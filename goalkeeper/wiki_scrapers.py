@@ -3,6 +3,7 @@ __author__ = 'jorgesaldivar'
 import requests, utils
 from bs4 import BeautifulSoup
 from datetime import date
+from data_collector import read_championships_file
 
 
 # Background color
@@ -25,6 +26,7 @@ RED_HEX = '#ff4444;'
 class ChampionshipScraper:
     url = ''
     dom = None
+    prefix_url = 'https://es.wikipedia.org'
 
     def __init__(self, url):
         self.url = url
@@ -36,57 +38,65 @@ class ChampionshipScraper:
                     team.update(team_extra_info)
                     break
 
-    def collect_championship_info(self, championship, information_to_collect):
+    def __get_info_to_collect(self, championship):
+        additional_info = championship['additional_info']
+        return [option.strip() for option in additional_info.split(';')]
+
+    def collect_championship_info(self, championship):
         ret = requests.get(self.url)
-        self.dom = BeautifulSoup(ret.text, 'html.parser')
-        championship_year = championship['year']
-        championship_name = championship['name']
-        teams = {}
-        champ = {}
-        if 'teams info':
-            teams = self.__process_table_teams(
-                self.__get_table_teams(championship_year)
-            )
-        if 'season statuses' in information_to_collect:
-            season_statuses = self.__process_table_season_statuses(
-                self.__get_table_season_statuses(championship_year), championship_year
-            )
-            self.__update_teams_info(teams, season_statuses)
-        if 'top scorers' in information_to_collect:
-            champ['top_scorers'] = self.__process_table_top_scorers(
-                self.__get_championship_top_scorers()
-            )
-        if 'coach substitutions' in information_to_collect:
-            champ['coach_substitutions'] = self.__process_table_coach_substitutions(
-                self.__get_coach_substitutions_info(championship_name, championship_year)
-            )
-        if 'team buyers' in information_to_collect:
-            team_buyers = self.__process_table_team_buyers(
-                self.__get_table_team_buyers()
-            )
-            self.__update_teams_info(teams, team_buyers)
-        if 'game top audiences' in information_to_collect:
-            champ['top_audiences'] = self.__process_table_top_audience_games(
-                self.__get_info_games_large_audience()
-            )
-        if 'team cards' in information_to_collect:
-            team_cards = self.__process_table_team_cards(
-                self.__get_table_team_cards()
-            )
-            self.__update_teams_info(teams, team_cards)
-        if 'referees' in information_to_collect:
-            champ['referees'] = self.__process_table_referees(
-                self.__get_referees_info()
-            )
-        if 'team audiences' in information_to_collect:
-            team_audiences = self.__process_table_team_audience(
-                self.__get_table_audience()
-            )
-            self.__update_teams_info(teams, team_audiences)
-        return {
-            'championship': champ,
-            'teams' : teams
-        }
+        if ret.status_code == 200:
+            self.dom = BeautifulSoup(ret.text, 'html.parser')
+            information_to_collect = self.__get_info_to_collect(championship)
+            championship_year = championship['year']
+            championship_name = championship['name']
+            teams = {}
+            champ = {}
+            if 'teams info' in information_to_collect:
+                teams = self.__process_table_teams(
+                    self.__get_table_teams(championship_year)
+                )
+            if 'season statuses' in information_to_collect:
+                season_statuses = self.__process_table_season_statuses(
+                    self.__get_table_season_statuses(championship_year), championship_year
+                )
+                self.__update_teams_info(teams, season_statuses)
+            if 'top scorers' in information_to_collect:
+                champ['top_scorers'] = self.__process_table_top_scorers(
+                    self.__get_championship_top_scorers()
+                )
+            if 'coach substitutions' in information_to_collect:
+                champ['coach_substitutions'] = self.__process_table_coach_substitutions(
+                    self.__get_coach_substitutions_info(championship_name, championship_year)
+                )
+            if 'team buyers' in information_to_collect:
+                team_buyers = self.__process_table_team_buyers(
+                    self.__get_table_team_buyers()
+                )
+                self.__update_teams_info(teams, team_buyers)
+            if 'game top audiences' in information_to_collect:
+                champ['top_audiences'] = self.__process_table_top_audience_games(
+                    self.__get_info_games_large_audience()
+                )
+            if 'team cards' in information_to_collect:
+                team_cards = self.__process_table_team_cards(
+                    self.__get_table_team_cards()
+                )
+                self.__update_teams_info(teams, team_cards)
+            if 'referees' in information_to_collect:
+                champ['referees'] = self.__process_table_referees(
+                    self.__get_referees_info()
+                )
+            if 'team audiences' in information_to_collect:
+                team_audiences = self.__process_table_team_audience(
+                    self.__get_table_audience()
+                )
+                self.__update_teams_info(teams, team_audiences)
+            return {
+                'championship': champ,
+                'teams' : teams
+            }
+        else:
+            raise Exception('Request get the code ' + ret.status_code)
 
     def __translante_month_letter_to_number(self, month_letter):
         months = ['enero', 'febrero', 'marzo', 'abril', 'mayo',
@@ -103,7 +113,7 @@ class ChampionshipScraper:
             if team_tag.has_key('title'):
                 team_wikipage = team_tag['href']
                 team['name'] = utils.to_unicode(team_tag.get_text(strip=True).lower())
-                team['wikipage'] = team_wikipage if 'redlink' not in team_wikipage else ''
+                team['wikipage'] = self.prefix_url + team_wikipage if 'redlink' not in team_wikipage else ''
                 break
         return team
 
@@ -111,9 +121,12 @@ class ChampionshipScraper:
         coach_tag = table_cell.find('a')
         coach = {'name': utils.to_unicode(coach_tag.get_text(strip=True).lower())}
         coach_wikipage = coach_tag['href']
-        coach['wikipage'] = coach_wikipage if 'redlink' not in coach_wikipage else ''
-        nationality = coach_tag.span.img['alt'].replace('Bandera de', '').strip().lower()
-        coach['nationality'] = nationality
+        coach['wikipage'] = self.prefix_url + coach_wikipage if 'redlink' not in coach_wikipage else ''
+        try:
+            nationality = table_cell.span.img['alt'].replace('Bandera de', '').strip().lower()
+            coach['nationality'] = nationality
+        except:
+            pass
         return coach
 
     def __process_date_cell(self, table_cell):
@@ -128,14 +141,17 @@ class ChampionshipScraper:
         stadium_tag = table_cell.find('a')
         stadium_wikipage = stadium_tag['href']
         stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True).lower()),
-                   'wikipage': stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
+                   'wikipage': self.prefix_url + stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
         return stadium
 
     def __process_city_cell(self, table_cell):
         city_tag = table_cell.find('a')
-        city_wikipage = city_tag['href']
-        city = {'name': utils.to_unicode(city_tag.get_text(strip=True).lower()),
-                'wikipage': city_wikipage if 'redlink' not in city_wikipage else ''}
+        if city_tag:
+            city_wikipage = city_tag['href']
+            city = {'name': utils.to_unicode(city_tag.get_text(strip=True).lower()),
+                    'wikipage': self.prefix_url + city_wikipage if 'redlink' not in city_wikipage else ''}
+        else:
+            city = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
         return city
 
     def __process_table_teams(self, table):
@@ -148,7 +164,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             team = {}
@@ -177,9 +193,8 @@ class ChampionshipScraper:
             table_headers = table.find_all('th')
             for table_header in table_headers:
                 header_content = table_header.get_text(strip=True).lower()
-                for header_key in dict_headers.keys():
-                    if header_content in dict_headers[header_key]:
-                        dict_headers[header_key] = True
+                if dict_headers.get(header_content) is not None:
+                    dict_headers[header_content] = True
             headers_found = [dict_headers[h] for h in dict_headers.keys()]
             if False not in headers_found:
                 return table
@@ -212,7 +227,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             team = {}
@@ -250,7 +265,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             team = {}
@@ -288,7 +303,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             team = {}
@@ -316,74 +331,82 @@ class ChampionshipScraper:
 
     def __process_team_season_final_status(self, row, year):
         if year == '1998':
-            if row['style'] == 'background:' + YELLOW_HEX:
-                return ['libertadores', 'mercosur']
+            if row.has_attr('style'):
+                if row['style'] == 'background:' + YELLOW_HEX:
+                    return ['libertadores', 'mercosur']
             else:
                 return None
         if year == '1999':
-            if row.has_key('bgcolor'):
+            if row.has_attr('bgcolor'):
                 return ['relegation']
             else:
                 return None
         if year == '2000':
-            if row['style'].lower() == 'background:' + PINK_HEX:
-                return ['relegation']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + PINK_HEX:
+                    return ['relegation']
             else:
                 return None
         if year in ['2001', '2003', '2004']:
-            if row['style'].lower() == 'background:' + YELLOW_HEX:
-                return ['libertadores']
-            if row['style'].lower() == 'background:' + RED_HEX:
-                return ['relegation']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + YELLOW_HEX:
+                    return ['libertadores']
+                if row['style'].lower() == 'background:' + RED_HEX:
+                    return ['relegation']
             else:
                 return None
         if year == '2002':
-            if row['style'].lower() == 'background:' + YELLOW_HEX or \
-               row['style'].lower() == 'background:' + BLUE_HEX:
-                return ['libertadores']
-            if row['style'].lower() == 'background:' + GREEN_HEX:
-                return ['sub relegation']
-            if row['style'].lower() == 'background:' + LIGHT_GREEN_HEX:
-                return ['relegation']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + YELLOW_HEX or \
+                   row['style'].lower() == 'background:' + BLUE_HEX:
+                    return ['libertadores']
+                if row['style'].lower() == 'background:' + GREEN_HEX:
+                    return ['sub relegation']
+                if row['style'].lower() == 'background:' + LIGHT_GREEN_HEX:
+                    return ['relegation']
             else:
                 return None
         if year == '2005':
-            if row['style'].lower() == 'background:' + YELLOW_HEX:
-                return ['libertadores', 'sudamericana']
-            if row['style'].lower() == 'background:' + BLUE_HEX:
-                return ['libertadores']
-            if row['style'].lower() == 'background:' + LIGHT_GREEN_HEX:
-                return ['sudamericana']
-            if row['style'].lower() == 'background:' + RED_HEX:
-                return ['relegation']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + YELLOW_HEX:
+                    return ['libertadores', 'sudamericana']
+                if row['style'].lower() == 'background:' + BLUE_HEX:
+                    return ['libertadores']
+                if row['style'].lower() == 'background:' + LIGHT_GREEN_HEX:
+                    return ['sudamericana']
+                if row['style'].lower() == 'background:' + RED_HEX:
+                    return ['relegation']
             else:
                 return None
         if 2005 < int(year) < 2016:
-            if row['bgcolor'].lower() == LIGHT_YELLOW_HEX:
-                return ['libertadores', 'sudamericana']
-            if row['bgcolor'].lower() == GREEN_HEX:
-                return ['libertadores']
-            if row['bgcolor'].lower() == LIGHT_BLUE_HEX:
-                return ['sudamericana']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + LIGHT_YELLOW_HEX:
+                    return ['libertadores', 'sudamericana']
+                if row['style'].lower() == 'background:' + GREEN_HEX:
+                    return ['libertadores']
+                if row['style'].lower() == 'background:' + LIGHT_BLUE_HEX:
+                    return ['sudamericana']
             else:
                 return None
         if int(year) == 2016:
-            if row['bgcolor'].lower() == LIGHT_YELLOW_HEX or \
-               row['bgcolor'].lower() == DARK_GREEN_HEX or \
-               row['bgcolor'].lower() == GREEN_HEX2:
-                return ['libertadores']
-            if row['bgcolor'].lower() == LIGHT_BLUE_HEX:
-                return ['sudamericana']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + LIGHT_YELLOW_HEX or \
+                   row['style'].lower() == 'background:' + DARK_GREEN_HEX or \
+                   row['style'].lower() == 'background:' + GREEN_HEX2:
+                    return ['libertadores']
+                if row['style'].lower() == 'background:' + LIGHT_BLUE_HEX:
+                    return ['sudamericana']
             else:
                 return None
         if int(year) == 2017:
-            if row['bgcolor'].lower() == DARK_YELLOW_HEX or \
-               row['bgcolor'].lower() == ORANGE_HEX or \
-               row['bgcolor'].lower() == LIGHT_GREEN_HEX2 or \
-               row['bgcolor'].lower() == LIGHT_YELLOW_HEX:
-                return ['libertadores']
-            if row['bgcolor'].lower() == LIGHT_BLUE_HEX2:
-                return ['sudamericana']
+            if row.has_attr('style'):
+                if row['style'].lower() == 'background:' + DARK_YELLOW_HEX or \
+                   row['style'].lower() == 'background:' + ORANGE_HEX or \
+                   row['style'].lower() == 'background:' + LIGHT_GREEN_HEX2 or \
+                   row['style'].lower() == 'background:' + LIGHT_YELLOW_HEX:
+                    return ['libertadores']
+                if row['style'].lower() == 'background:' + LIGHT_BLUE_HEX2:
+                    return ['sudamericana']
             else:
                 return None
 
@@ -397,7 +420,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             team = {}
@@ -445,14 +468,14 @@ class ChampionshipScraper:
             raise Exception('Could not find table of team season buyers')
 
     def __process_country_flag_cell(self, table_cell):
-        country_flag = table_cell.find('a')
-        return utils.to_unicode(country_flag['title'].lower())
+        country_flag = table_cell.span.img
+        return utils.to_unicode(country_flag['title'].replace('Bandera de', '').strip().lower())
 
     def __process_player_cell(self, table_cell):
         player_tag = table_cell.find('a')
         player_wikipage = player_tag['href']
         player = {'name': utils.to_unicode(player_tag.get_text(strip=True).lower()),
-                  'wikipage': player_wikipage if 'redlink' not in player_wikipage else ''}
+                  'wikipage': self.prefix_url + player_wikipage if 'redlink' not in player_wikipage else ''}
         return player
 
     def __process_table_top_scorers(self, table):
@@ -465,7 +488,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             top_scorer = {}
@@ -503,7 +526,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             substitution = {}
@@ -550,7 +573,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             top_audience_game = {}
@@ -591,7 +614,7 @@ class ChampionshipScraper:
         # Process Table Rows
         table_rows = table.find_all('tr')
         num_rows = len(table_rows)
-        for i in range(0, num_rows):
+        for i in range(1, num_rows):
             table_columns = table_rows[i].find_all('td')
             num_cols = len(table_columns)
             referee = {}
@@ -617,3 +640,15 @@ class ChampionshipScraper:
             return table_referees
         else:
             raise Exception('Could not find table of referees')
+
+
+if __name__ == '__main__':
+    championship = read_championships_file('../data/campeonatos.csv')
+    championship_test = championship[49]
+    ws = ChampionshipScraper(
+        url=championship_test['championship_source_url']
+    )
+    ret = ws.collect_championship_info(championship_test)
+    pass
+
+# TODO: check process_final_status_table
