@@ -1,0 +1,619 @@
+__author__ = 'jorgesaldivar'
+
+import requests, utils
+from bs4 import BeautifulSoup
+from datetime import date
+
+
+# Background color
+YELLOW_HEX = '#ffcc00;'
+DARK_YELLOW_HEX = '#ffff00'
+LIGHT_YELLOW_HEX = '#f0e68c'
+ORANGE_HEX = '#ffd700'
+PINK_HEX = '#ffcccc;'
+BLUE_HEX = '#00ccff;'
+LIGHT_BLUE_HEX = '#87cefa'
+LIGHT_BLUE_HEX2 = '#afeeee'
+GREEN_HEX = '#90ee90;'
+LIGHT_GREEN_HEX = '#ccff00;'
+LIGHT_GREEN_HEX2 = '#adff2f'
+DARK_GREEN_HEX = '#66cdaa'
+GREEN_HEX2 = '#32cd32'
+RED_HEX = '#ff4444;'
+
+
+class ChampionshipScraper:
+    url = ''
+    dom = None
+
+    def __init__(self, url):
+        self.url = url
+
+    def __update_teams_info(self, teams, teams_extra_info):
+        for team in teams:
+            for team_extra_info in teams_extra_info:
+                if team['name'] == team_extra_info['name']:
+                    team.update(team_extra_info)
+                    break
+
+    def collect_championship_info(self, championship, information_to_collect):
+        ret = requests.get(self.url)
+        self.dom = BeautifulSoup(ret.text, 'html.parser')
+        championship_year = championship['year']
+        championship_name = championship['name']
+        teams = {}
+        champ = {}
+        if 'teams info':
+            teams = self.__process_table_teams(
+                self.__get_table_teams(championship_year)
+            )
+        if 'season statuses' in information_to_collect:
+            season_statuses = self.__process_table_season_statuses(
+                self.__get_table_season_statuses(championship_year), championship_year
+            )
+            self.__update_teams_info(teams, season_statuses)
+        if 'top scorers' in information_to_collect:
+            champ['top_scorers'] = self.__process_table_top_scorers(
+                self.__get_championship_top_scorers()
+            )
+        if 'coach substitutions' in information_to_collect:
+            champ['coach_substitutions'] = self.__process_table_coach_substitutions(
+                self.__get_coach_substitutions_info(championship_name, championship_year)
+            )
+        if 'team buyers' in information_to_collect:
+            team_buyers = self.__process_table_team_buyers(
+                self.__get_table_team_buyers()
+            )
+            self.__update_teams_info(teams, team_buyers)
+        if 'game top audiences' in information_to_collect:
+            champ['top_audiences'] = self.__process_table_top_audience_games(
+                self.__get_info_games_large_audience()
+            )
+        if 'team cards' in information_to_collect:
+            team_cards = self.__process_table_team_cards(
+                self.__get_table_team_cards()
+            )
+            self.__update_teams_info(teams, team_cards)
+        if 'referees' in information_to_collect:
+            champ['referees'] = self.__process_table_referees(
+                self.__get_referees_info()
+            )
+        if 'team audiences' in information_to_collect:
+            team_audiences = self.__process_table_team_audience(
+                self.__get_table_audience()
+            )
+            self.__update_teams_info(teams, team_audiences)
+        return {
+            'championship': champ,
+            'teams' : teams
+        }
+
+    def __translante_month_letter_to_number(self, month_letter):
+        months = ['enero', 'febrero', 'marzo', 'abril', 'mayo',
+                  'junio', 'julio', 'agosto', 'setiembre',
+                  'octubre', 'noviembre', 'diciembre']
+        for idx in range(0, 12):
+            if months[idx] == month_letter:
+                return idx+1
+
+    def __process_team_cell(self, table_cell):
+        team_tags = table_cell.find_all('a')
+        team = {}
+        for team_tag in team_tags:
+            if team_tag.has_key('title'):
+                team_wikipage = team_tag['href']
+                team['name'] = utils.to_unicode(team_tag.get_text(strip=True).lower())
+                team['wikipage'] = team_wikipage if 'redlink' not in team_wikipage else ''
+                break
+        return team
+
+    def __process_coach_cell(self, table_cell):
+        coach_tag = table_cell.find('a')
+        coach = {'name': utils.to_unicode(coach_tag.get_text(strip=True).lower())}
+        coach_wikipage = coach_tag['href']
+        coach['wikipage'] = coach_wikipage if 'redlink' not in coach_wikipage else ''
+        nationality = coach_tag.span.img['alt'].replace('Bandera de', '').strip().lower()
+        coach['nationality'] = nationality
+        return coach
+
+    def __process_date_cell(self, table_cell):
+        date_links = table_cell.find_all('a')
+        day_month = date_links[0].get_text(strip=True).lower().replace('de', '').split()
+        day = int(day_month[0])
+        month = self.__translante_month_letter_to_number(day_month[1])
+        year = int(date_links[1].get_text(strip=True).lower())
+        return date(year, month, day).isoformat()
+
+    def __process_stadium_cell(self, table_cell):
+        stadium_tag = table_cell.find('a')
+        stadium_wikipage = stadium_tag['href']
+        stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True).lower()),
+                   'wikipage': stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
+        return stadium
+
+    def __process_city_cell(self, table_cell):
+        city_tag = table_cell.find('a')
+        city_wikipage = city_tag['href']
+        city = {'name': utils.to_unicode(city_tag.get_text(strip=True).lower()),
+                'wikipage': city_wikipage if 'redlink' not in city_wikipage else ''}
+        return city
+
+    def __process_table_teams(self, table):
+        teams = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            team = {}
+            for j in range(0, num_cols):
+                if 'equipo' in header[j]:
+                    team.update(self.__process_team_cell(table_columns[j]))
+                if 'ciudad' in header[j]:
+                    team['city'] = self.__process_city_cell(table_columns[j])
+                if 'estadio' in header[j]:
+                    team['stadium'] = self.__process_stadium_cell(table_columns[j])
+                if 'capacidad' in header[j]:
+                    team['stadium']['capacity'] = table_columns[j].get_text(strip=True)
+                if 'fundacion' in header[j]:
+                    team['foundation'] = self.__process_date_cell(table_columns[j])
+                if 'entrenador' in header[j]:
+                    team['coach'] = self.__process_coach_cell(table_columns[j])
+                if 'indumentaria' in header[j]:
+                    team['brand'] = table_columns[j].get_text(strip=True).lower()
+            teams.append(team)
+        return teams
+
+    def __get_table(self, headers):
+        dict_headers = {h: False for h in headers}
+        tables = self.dom.find_all('table')
+        for table in tables:
+            table_headers = table.find_all('th')
+            for table_header in table_headers:
+                header_content = table_header.get_text(strip=True).lower()
+                for header_key in dict_headers.keys():
+                    if header_content in dict_headers[header_key]:
+                        dict_headers[header_key] = True
+            headers_found = [dict_headers[h] for h in dict_headers.keys()]
+            if False not in headers_found:
+                return table
+        return None
+
+    '''
+       Get all information about teams
+       Key words: team info
+       '''
+    def __get_table_teams(self, year):
+        if year in ['1998', '1999', '2000', '2001', '2006','2007', '2008',
+                    '2009', '2015', '2016', '2017']:
+            headers = ['equipo', 'ciudad', 'estadio', 'capacidad']
+        #  year in ['2010','2011', '2012', '2013', '2014']:
+        else:
+            headers = ['equipos', 'ciudad', 'estadio', 'capacidad']
+        table_teams = self.__get_table(headers)
+        if table_teams:
+            return table_teams
+        else:
+            raise Exception('Could not find table of teams')
+
+    def __process_table_team_audience(self, table):
+        team_audiences = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            team = {}
+            for j in range(0, num_cols):
+                if 'equipos' in header[j]:
+                    team.update(self.__process_team_cell(table_columns[j]))
+                if 'reacaudaci' in header[j]:
+                    team['income'] = table_columns[j].get_text(strip=True)
+                if 'pagantes' in header[j]:
+                    team['buyers'] = table_columns[j].get_text(strip=True)
+                if 'asistentes' in header[j]:
+                    team['audience'] = table_columns[j].get_text(strip=True)
+            team_audiences.append(team)
+        return team_audiences
+
+    '''
+    Get information about total audience per team
+    Key words: team audiences
+    '''
+    def __get_table_audience(self):
+        headers = ['equipos', 'pagantes', 'asistentes']
+        table_audience = self.__get_table(headers)
+        if table_audience:
+            return table_audience
+        else:
+            raise Exception('Could not find table of team audiences')
+
+    def __process_table_team_cards(self, table):
+        team_cards = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            team = {}
+            for j in range(0, num_cols):
+                if 'equipo' in header[j]:
+                    team.update(self.__process_team_cell(table_columns[j]))
+                if 'ta' == header[j]:
+                    team['yellow_cards'] = table_columns[j].get_text(strip=True)
+                if 'rd' == header[j]:
+                    team['red_cards'] = table_columns[j].get_text(strip=True)
+                if 'pj' == header[j]:
+                    team['games'] = table_columns[j].get_text(strip=True)
+            team_cards.append(team)
+        return team_cards
+
+    '''
+    Get information about total buyers per team
+    Key words: team cards
+    '''
+    def __get_table_team_cards(self):
+        headers = ['equipo', 'ta', 'tr', 'rd', 'pj']
+        table_cards = self.__get_table(headers)
+        if table_cards:
+            return table_cards
+        else:
+            raise Exception('Could not find table of team cards')
+
+    def __process_table_team_buyers(self, table):
+        team_buyers = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            team = {}
+            for j in range(0, num_cols):
+                if 'equipos' in header[j]:
+                    team.update(self.__process_team_cell(table_columns[j]))
+                if 'pj' == header[j]:
+                    team['games'] = table_columns[j].get_text(strip=True)
+                if 'as.' in header[j]:
+                    team['buyers'] = table_columns[j].get_text(strip=True)
+            team_buyers.append(team)
+        return team_buyers
+
+    '''
+    Get information about total buyers per team
+    Key words: team buyers
+    '''
+    def __get_table_team_buyers(self):
+        headers = ['equipos', 'pj', 'as.', 'pos.']
+        table_buyers = self.__get_table(headers)
+        if table_buyers:
+            return table_buyers
+        else:
+            raise Exception('Could not find table of team season buyers')
+
+    def __process_team_season_final_status(self, row, year):
+        if year == '1998':
+            if row['style'] == 'background:' + YELLOW_HEX:
+                return ['libertadores', 'mercosur']
+            else:
+                return None
+        if year == '1999':
+            if row.has_key('bgcolor'):
+                return ['relegation']
+            else:
+                return None
+        if year == '2000':
+            if row['style'].lower() == 'background:' + PINK_HEX:
+                return ['relegation']
+            else:
+                return None
+        if year in ['2001', '2003', '2004']:
+            if row['style'].lower() == 'background:' + YELLOW_HEX:
+                return ['libertadores']
+            if row['style'].lower() == 'background:' + RED_HEX:
+                return ['relegation']
+            else:
+                return None
+        if year == '2002':
+            if row['style'].lower() == 'background:' + YELLOW_HEX or \
+               row['style'].lower() == 'background:' + BLUE_HEX:
+                return ['libertadores']
+            if row['style'].lower() == 'background:' + GREEN_HEX:
+                return ['sub relegation']
+            if row['style'].lower() == 'background:' + LIGHT_GREEN_HEX:
+                return ['relegation']
+            else:
+                return None
+        if year == '2005':
+            if row['style'].lower() == 'background:' + YELLOW_HEX:
+                return ['libertadores', 'sudamericana']
+            if row['style'].lower() == 'background:' + BLUE_HEX:
+                return ['libertadores']
+            if row['style'].lower() == 'background:' + LIGHT_GREEN_HEX:
+                return ['sudamericana']
+            if row['style'].lower() == 'background:' + RED_HEX:
+                return ['relegation']
+            else:
+                return None
+        if 2005 < int(year) < 2016:
+            if row['bgcolor'].lower() == LIGHT_YELLOW_HEX:
+                return ['libertadores', 'sudamericana']
+            if row['bgcolor'].lower() == GREEN_HEX:
+                return ['libertadores']
+            if row['bgcolor'].lower() == LIGHT_BLUE_HEX:
+                return ['sudamericana']
+            else:
+                return None
+        if int(year) == 2016:
+            if row['bgcolor'].lower() == LIGHT_YELLOW_HEX or \
+               row['bgcolor'].lower() == DARK_GREEN_HEX or \
+               row['bgcolor'].lower() == GREEN_HEX2:
+                return ['libertadores']
+            if row['bgcolor'].lower() == LIGHT_BLUE_HEX:
+                return ['sudamericana']
+            else:
+                return None
+        if int(year) == 2017:
+            if row['bgcolor'].lower() == DARK_YELLOW_HEX or \
+               row['bgcolor'].lower() == ORANGE_HEX or \
+               row['bgcolor'].lower() == LIGHT_GREEN_HEX2 or \
+               row['bgcolor'].lower() == LIGHT_YELLOW_HEX:
+                return ['libertadores']
+            if row['bgcolor'].lower() == LIGHT_BLUE_HEX2:
+                return ['sudamericana']
+            else:
+                return None
+
+    def __process_table_season_statuses(self, table, year):
+        team_season = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            team = {}
+            for j in range(0, num_cols):
+                if 'equipo' in header[j] or 'equipos' in header[j]:
+                    team.update(self.__process_team_cell(table_columns[j]))
+                if 'pts' in header[j]:
+                    team['points'] = table_columns[j].get_text(strip=True)
+                if 'pj' == header[j]:
+                    team['games'] = table_columns[j].get_text(strip=True)
+                if 'pg' == header[j] or 'g' == header[j]:
+                    team['won'] = table_columns[j].get_text(strip=True)
+                if 'pe' == header[j] or 'e' == header[j]:
+                    team['drew'] = table_columns[j].get_text(strip=True)
+                if 'pp' == header[j] or 'p' == header[j]:
+                    team['lost'] = table_columns[j].get_text(strip=True)
+                if 'gf' == header[j]:
+                    team['gf'] = table_columns[j].get_text(strip=True)
+                if 'gc' == header[j]:
+                    team['gc'] = table_columns[j].get_text(strip=True)
+                if 'dif' in header[j]:
+                    team['goals_difference'] = table_columns[j].get_text(strip=True)
+            team['international_status'] = self.__process_team_season_final_status(table_rows[i], year)
+            team_season.append(team)
+        return team_season
+
+    '''
+    Get information about teams' season final status
+    Key words: season statuses
+    '''
+    def __get_table_season_statuses(self, year):
+        if year in ['1998', '2000', '2001', '2002', '2003']:
+            headers = ['pos', 'equipo', 'pts', 'pj', 'g', 'e', 'p', 'gf', 'gc', 'dif']
+        elif year in ['1999', '2006', '2009', '2011', '2012', '2013', '2014']:
+            headers = ['pos.', 'equipos', 'pts.', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.']
+        elif year in ['2004', '2005']:
+            headers = ['equipo', 'pts', 'pj', 'g', 'e', 'p', 'gf', 'gc', 'dif']
+        # year in ['2007', '2008', '2015', '2016']
+        else:
+            headers = ['pos.', 'equipo', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.', 'pts.']
+        table_season = self.__get_table(headers)
+        if table_season:
+            return table_season
+        else:
+            raise Exception('Could not find table of team season buyers')
+
+    def __process_country_flag_cell(self, table_cell):
+        country_flag = table_cell.find('a')
+        return utils.to_unicode(country_flag['title'].lower())
+
+    def __process_player_cell(self, table_cell):
+        player_tag = table_cell.find('a')
+        player_wikipage = player_tag['href']
+        player = {'name': utils.to_unicode(player_tag.get_text(strip=True).lower()),
+                  'wikipage': player_wikipage if 'redlink' not in player_wikipage else ''}
+        return player
+
+    def __process_table_top_scorers(self, table):
+        top_scorers = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            top_scorer = {}
+            for j in range(0, num_cols):
+                if 'pais' in header[j]:
+                    top_scorer['nationality'] = self.__process_country_flag_cell(table_columns[j])
+                if 'jugador' in header[j]:
+                    top_scorer['scorer'] = self.__process_player_cell(table_columns[j])
+                if 'equipo' in header[j]:
+                    top_scorer['team'] = self.__process_team_cell(table_columns[j])
+                if 'goles' in header[j]:
+                    top_scorer['goals'] = table_columns[j].get_text(strip=True)
+            top_scorers.append(top_scorer)
+        return top_scorers
+
+    '''
+    Get information about the championship's top scorers
+    Key words: top scorers
+    '''
+    def __get_championship_top_scorers(self):
+        headers = ['pais', 'jugador', 'equipo', 'goles']
+        table_top_scorers = self.__get_table(headers)
+        if table_top_scorers:
+            return table_top_scorers
+        else:
+            raise Exception('Could not find table of top scorers')
+
+    def __process_table_coach_substitutions(self, table):
+        coach_substitutions = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            substitution = {}
+            for j in range(0, num_cols):
+                if 'equipos' in header[j]:
+                    substitution['team'] = self.__process_team_cell(table_columns[j])
+                if 'ste' in header[j] or 'saliente' in header[j]:
+                    substitution['coach_out'] = self.__process_coach_cell(table_columns[j])
+                if 'cese' in header[j]:
+                    substitution['date_out'] = self.__process_date_cell(table_columns[j])
+                if 'ete' in header[j] or 'entrante' in header[j]:
+                    substitution['coach_in'] = self.__process_coach_cell(table_columns[j])
+                if 'designaci' in header[j]:
+                    substitution['date_in'] = self.__process_date_cell(table_columns[j])
+                if 'fechas dirigidas' in header[j]:
+                    substitution['coach_out']['games'] = table_columns[j].get_text(strip=True)
+            coach_substitutions.append(substitution)
+        return coach_substitutions
+
+    '''
+    Get information about coach changes during the 
+    tournament
+    Key words: coach substitutions
+    '''
+    def __get_coach_substitutions_info(self, championship_name, year):
+        if int(year) < 2016 or \
+           (int(year) == 2016 and 'apertura' in championship_name):
+            headers = ['equipos', 'dt. ste.', 'cese', 'dt. ete.']
+        else:
+            headers = ['equipos', 'dt. saliente', 'cese', 'dt. entrante', 'fechas dirigidas']
+        table_coaches = self.__get_table(headers)
+        if table_coaches:
+            return table_coaches
+        else:
+            raise Exception('Could not find table of coach replacements')
+
+    def __process_table_top_audience_games(self, table):
+        top_audience_games = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            top_audience_game = {}
+            for j in range(0, num_cols):
+                if 'partido' in header[j]:
+                    teams = table_columns[j].find_all('a')
+                    top_audience_game['home_team'] = self.__process_team_cell(teams[0])
+                    top_audience_game['away_team'] = self.__process_team_cell(teams[1])
+                if 'asistentes' in header[j]:
+                    top_audience_game['audience'] = table_columns[j].get_text(strip=True)
+                if 'estadio' in header[j]:
+                    top_audience_game['stadium'] = self.__process_stadium_cell(table_columns[j])
+                if 'fecha' in header[j]:
+                    top_audience_game['game'] =  table_columns[j].get_text(strip=True)
+            top_audience_games.append(top_audience_game)
+        return top_audience_games
+
+    '''
+    Get information about games with the largest audience
+    in the tournament
+    Key words: games top audiences
+    '''
+    def __get_info_games_large_audience(self):
+        headers = ['pos.', 'partido', 'asistentes', 'estadio', 'fecha']
+        table_top_audiences = self.__get_table(headers)
+        if table_top_audiences:
+            return table_top_audiences
+        else:
+            raise Exception('Could not find table of games with top audiences')
+
+    def __process_table_referees(self, table):
+        referees = []
+        header = []
+        # Process Table Headers
+        table_headers = table.find_all('th')
+        for table_header in table_headers:
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(0, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            referee = {}
+            for j in range(0, num_cols):
+                if 'rbitro' in header[j]:
+                    referee['name'] = table_columns[j].get_text(strip=True).lower()
+                if 'ta' == header[j]:
+                    referee['yellow_cards'] = table_columns[j].get_text(strip=True)
+                if 'tr' == header[j]:
+                    referee['red_cards'] = table_columns[j].get_text(strip=True)
+                if 'pd' == header[j]:
+                    referee['games'] = table_columns[j].get_text(strip=True)
+            referees.append(referee)
+        return referees
+
+    '''
+    Get information about referees
+    '''
+    def __get_referees_info(self):
+        headers = ['ta', 'tr', 'pd']
+        table_referees = self.__get_table(headers)
+        if table_referees:
+            return table_referees
+        else:
+            raise Exception('Could not find table of referees')
