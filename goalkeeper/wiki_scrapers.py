@@ -15,7 +15,7 @@ PINK_HEX = '#ffcccc;'
 BLUE_HEX = '#00ccff;'
 LIGHT_BLUE_HEX = '#87cefa'
 LIGHT_BLUE_HEX2 = '#afeeee'
-GREEN_HEX = '#90ee90;'
+GREEN_HEX = '#90ee90'
 LIGHT_GREEN_HEX = '#ccff00;'
 LIGHT_GREEN_HEX2 = '#adff2f'
 DARK_GREEN_HEX = '#66cdaa'
@@ -119,15 +119,22 @@ class ChampionshipScraper:
 
     def __process_coach_cell(self, table_cell):
         coach_tag = table_cell.find('a')
-        coach = {'name': utils.to_unicode(coach_tag.get_text(strip=True).lower())}
-        coach_wikipage = coach_tag['href']
-        coach['wikipage'] = self.prefix_url + coach_wikipage if 'redlink' not in coach_wikipage else ''
+        if coach_tag:
+            coach = {'name': utils.to_unicode(coach_tag.get_text(strip=True).lower())}
+            coach_wikipage = coach_tag['href']
+            coach['wikipage'] = self.prefix_url + coach_wikipage if 'redlink' not in coach_wikipage else ''
+        else:
+            coach = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
         try:
             nationality = table_cell.span.img['alt'].replace('Bandera de', '').strip().lower()
             coach['nationality'] = nationality
         except:
             pass
         return coach
+
+    #TODO: continue here
+    def __process_coach_substitution_date_cell(self, table_cell):
+        date_info = table_cell.get_text(strip=True).lower().replace('de', '').split()
 
     def __process_date_cell(self, table_cell):
         date_links = table_cell.find_all('a')
@@ -187,9 +194,10 @@ class ChampionshipScraper:
         return teams
 
     def __get_table(self, headers):
-        dict_headers = {h: False for h in headers}
         tables = self.dom.find_all('table')
+        match_tables = []
         for table in tables:
+            dict_headers = {h: False for h in headers}
             table_headers = table.find_all('th')
             for table_header in table_headers:
                 header_content = table_header.get_text(strip=True).lower()
@@ -197,8 +205,8 @@ class ChampionshipScraper:
                     dict_headers[header_content] = True
             headers_found = [dict_headers[h] for h in dict_headers.keys()]
             if False not in headers_found:
-                return table
-        return None
+                match_tables.append(table)
+        return match_tables
 
     '''
        Get all information about teams
@@ -213,7 +221,7 @@ class ChampionshipScraper:
             headers = ['equipos', 'ciudad', 'estadio', 'capacidad']
         table_teams = self.__get_table(headers)
         if table_teams:
-            return table_teams
+            return table_teams[0]
         else:
             raise Exception('Could not find table of teams')
 
@@ -251,7 +259,7 @@ class ChampionshipScraper:
         headers = ['equipos', 'pagantes', 'asistentes']
         table_audience = self.__get_table(headers)
         if table_audience:
-            return table_audience
+            return table_audience[0]
         else:
             raise Exception('Could not find table of team audiences')
 
@@ -289,7 +297,7 @@ class ChampionshipScraper:
         headers = ['equipo', 'ta', 'tr', 'rd', 'pj']
         table_cards = self.__get_table(headers)
         if table_cards:
-            return table_cards
+            return table_cards[0]
         else:
             raise Exception('Could not find table of team cards')
 
@@ -325,7 +333,7 @@ class ChampionshipScraper:
         headers = ['equipos', 'pj', 'as.', 'pos.']
         table_buyers = self.__get_table(headers)
         if table_buyers:
-            return table_buyers
+            return table_buyers[0]
         else:
             raise Exception('Could not find table of team season buyers')
 
@@ -458,10 +466,39 @@ class ChampionshipScraper:
             headers = ['pos.', 'equipos', 'pts.', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.']
         elif year in ['2004', '2005']:
             headers = ['equipo', 'pts', 'pj', 'g', 'e', 'p', 'gf', 'gc', 'dif']
+        elif year == '2010':
+            headers = ['pos.', 'equipos', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.', 'pts.']
         # year in ['2007', '2008', '2015', '2016']
         else:
             headers = ['pos.', 'equipo', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.', 'pts.']
-        table_season = self.__get_table(headers)
+        tables_season = self.__get_table(headers)
+        table_season = None
+        for table in tables_season:
+            # get all rows
+            table_rows = table.find_all('tr')
+            # get first team
+            first_team = table_rows[1]   # first row is the header
+            pj_idx = headers.index('pj')
+            first_team_pj = int(first_team.find_all('td')[pj_idx].get_text(strip=True))
+            # pj should be equal to the total games in the season
+            if int(year) == 1998:
+                found_table_season = first_team_pj == 22
+            elif int(year) == 1999:
+                found_table_season = first_team_pj == 20
+            elif int(year) == 2001:
+                found_table_season = first_team_pj == 18
+            elif int(year) == 2000 or \
+                 2002 <= int(year) <= 2003:
+                found_table_season = first_team_pj == 27
+            elif 2004 <= int(year) <= 2005:
+                found_table_season = first_team_pj == 36
+            elif int(year) == 2006:
+                found_table_season = first_team_pj == 40
+            else:
+                found_table_season = first_team_pj == 44
+            if found_table_season:
+                table_season = table
+                break
         if table_season:
             return table_season
         else:
@@ -509,10 +546,10 @@ class ChampionshipScraper:
     Key words: top scorers
     '''
     def __get_championship_top_scorers(self):
-        headers = ['pais', 'jugador', 'equipo', 'goles']
+        headers = ['jugador', 'equipo', 'goles']
         table_top_scorers = self.__get_table(headers)
         if table_top_scorers:
-            return table_top_scorers
+            return table_top_scorers[0]
         else:
             raise Exception('Could not find table of top scorers')
 
@@ -559,7 +596,7 @@ class ChampionshipScraper:
             headers = ['equipos', 'dt. saliente', 'cese', 'dt. entrante', 'fechas dirigidas']
         table_coaches = self.__get_table(headers)
         if table_coaches:
-            return table_coaches
+            return table_coaches[0]
         else:
             raise Exception('Could not find table of coach replacements')
 
@@ -600,7 +637,7 @@ class ChampionshipScraper:
         headers = ['pos.', 'partido', 'asistentes', 'estadio', 'fecha']
         table_top_audiences = self.__get_table(headers)
         if table_top_audiences:
-            return table_top_audiences
+            return table_top_audiences[0]
         else:
             raise Exception('Could not find table of games with top audiences')
 
@@ -637,7 +674,7 @@ class ChampionshipScraper:
         headers = ['ta', 'tr', 'pd']
         table_referees = self.__get_table(headers)
         if table_referees:
-            return table_referees
+            return table_referees[0]
         else:
             raise Exception('Could not find table of referees')
 
