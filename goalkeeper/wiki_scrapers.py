@@ -128,7 +128,7 @@ class ChampionshipScraper:
             coach = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
         try:
             nationality = table_cell.span.img['alt'].replace('Bandera de', '').strip().lower()
-            coach['nationality'] = nationality
+            coach['country'] = nationality
         except:
             pass
         return coach
@@ -534,7 +534,7 @@ class ChampionshipScraper:
             top_scorer = {}
             for j in range(0, num_cols):
                 if 'pais' in header[j]:
-                    top_scorer['nationality'] = self.__process_country_flag_cell(table_columns[j])
+                    top_scorer['country'] = self.__process_country_flag_cell(table_columns[j])
                 if 'jugador' in header[j]:
                     top_scorer['scorer'] = self.__process_player_cell(table_columns[j])
                 if 'equipo' in header[j]:
