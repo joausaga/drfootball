@@ -23,7 +23,61 @@ GREEN_HEX2 = '#32cd32'
 RED_HEX = '#ff4444;'
 
 
-class ChampionshipScraper:
+class ParaguayanChampionshipResultsScraper:
+    url = ''
+    dom = None
+
+    def __init__(self, url):
+        self.url = url
+
+    def collect_championship_results(self, championship):
+        ret_rq = requests.get(self.url)
+        if ret_rq.status_code == 200:
+            self.dom = BeautifulSoup(ret_rq.text, 'html.parser')
+
+    def __get_fixture_tables(self):
+        tables = self.dom.find_all('table')
+        game_tables = []
+        for table in tables:
+            if table.has_attr['width'] and table['width'] == '100%':
+                continue
+            table_headers = table.find_all('th')
+            for table_header in table_headers:
+                header_content = table_header.get_text(strip=True).lower()
+                if 'fecha' in header_content:
+                    game_tables.append(table)
+        return game_tables
+
+    def __process_fixture_table(self, fixture_table):
+        game_results = []
+        header = []
+        # Process Table Headers
+        table_headers = fixture_table.find_all('th')
+        for table_header in table_headers:
+            if 'fecha' in table_header:
+                continue
+            header.append(table_header.get_text(strip=True).lower())
+        # Process Table Rows
+        table_rows = fixture_table.find_all('tr')
+        num_rows = len(table_rows)
+        for i in range(2, num_rows):
+            table_columns = table_rows[i].find_all('td')
+            num_cols = len(table_columns)
+            game = {}
+            for j in range(0, num_cols):
+                if 'equipo local' in header[j]:
+                    game['home_team'] = {'name': utils.to_unicode(table_columns[j].get_text(strip=True).lower())}
+                if 'resultado' in header[j]:
+                    resultado = table_columns[j].get_text(strip=True).split('-')
+                    game['home_team']['goals'] = resultado[0]
+                    game['away_team'] = {'goals': resultado[1]}
+                if 'equipo visitante' in header[j]:
+                    game['away_team']['name'] = utils.to_unicode(table_columns[j].get_text(strip=True).lower())
+            game_results.append(game)
+        return game_results
+
+
+class ParaguayanChampionshipScraper:
     url = ''
     dom = None
     prefix_url = 'https://es.wikipedia.org'
