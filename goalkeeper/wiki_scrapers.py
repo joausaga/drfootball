@@ -66,7 +66,8 @@ class ChampionshipScraper:
                 )
             if 'coach substitutions' in information_to_collect:
                 champ['coach_substitutions'] = self.__process_table_coach_substitutions(
-                    self.__get_coach_substitutions_info(championship_name, championship_year)
+                    self.__get_coach_substitutions_info(championship_name, championship_year),
+                    championship_year
                 )
             if 'team buyers' in information_to_collect:
                 team_buyers = self.__process_table_team_buyers(
@@ -100,7 +101,7 @@ class ChampionshipScraper:
 
     def __translante_month_letter_to_number(self, month_letter):
         months = ['enero', 'febrero', 'marzo', 'abril', 'mayo',
-                  'junio', 'julio', 'agosto', 'setiembre',
+                  'junio', 'julio', 'agosto', 'septiembre',
                   'octubre', 'noviembre', 'diciembre']
         for idx in range(0, 12):
             if months[idx] == month_letter:
@@ -132,9 +133,11 @@ class ChampionshipScraper:
             pass
         return coach
 
-    #TODO: continue here
-    def __process_coach_substitution_date_cell(self, table_cell):
-        date_info = table_cell.get_text(strip=True).lower().replace('de', '').split()
+    def __process_coach_substitution_date_cell(self, table_cell, year):
+        date_info = table_cell.contents[0].lower().replace('de', '').split()
+        day = int(date_info[0])
+        month = self.__translante_month_letter_to_number(date_info[1])
+        return date(int(year), month, day).isoformat()
 
     def __process_date_cell(self, table_cell):
         date_links = table_cell.find_all('a')
@@ -553,7 +556,7 @@ class ChampionshipScraper:
         else:
             raise Exception('Could not find table of top scorers')
 
-    def __process_table_coach_substitutions(self, table):
+    def __process_table_coach_substitutions(self, table, year):
         coach_substitutions = []
         header = []
         # Process Table Headers
@@ -573,11 +576,11 @@ class ChampionshipScraper:
                 if 'ste' in header[j] or 'saliente' in header[j]:
                     substitution['coach_out'] = self.__process_coach_cell(table_columns[j])
                 if 'cese' in header[j]:
-                    substitution['date_out'] = self.__process_date_cell(table_columns[j])
+                    substitution['date_out'] = self.__process_coach_substitution_date_cell(table_columns[j], year)
                 if 'ete' in header[j] or 'entrante' in header[j]:
                     substitution['coach_in'] = self.__process_coach_cell(table_columns[j])
                 if 'designaci' in header[j]:
-                    substitution['date_in'] = self.__process_date_cell(table_columns[j])
+                    substitution['date_in'] = self.__process_coach_substitution_date_cell(table_columns[j], year)
                 if 'fechas dirigidas' in header[j]:
                     substitution['coach_out']['games'] = table_columns[j].get_text(strip=True)
             coach_substitutions.append(substitution)
@@ -616,7 +619,7 @@ class ChampionshipScraper:
             top_audience_game = {}
             for j in range(0, num_cols):
                 if 'partido' in header[j]:
-                    teams = table_columns[j].find_all('a')
+                    teams = table_columns[j].get_text(strip=True).split('-')
                     top_audience_game['home_team'] = self.__process_team_cell(teams[0])
                     top_audience_game['away_team'] = self.__process_team_cell(teams[1])
                 if 'asistentes' in header[j]:
