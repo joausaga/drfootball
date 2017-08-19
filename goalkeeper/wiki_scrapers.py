@@ -149,9 +149,12 @@ class ChampionshipScraper:
 
     def __process_stadium_cell(self, table_cell):
         stadium_tag = table_cell.find('a')
-        stadium_wikipage = stadium_tag['href']
-        stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True).lower()),
-                   'wikipage': self.prefix_url + stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
+        if stadium_tag:
+            stadium_wikipage = stadium_tag['href']
+            stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True).lower()),
+                       'wikipage': self.prefix_url + stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
+        else:
+            stadium = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
         return stadium
 
     def __process_city_cell(self, table_cell):
@@ -620,8 +623,8 @@ class ChampionshipScraper:
             for j in range(0, num_cols):
                 if 'partido' in header[j]:
                     teams = table_columns[j].get_text(strip=True).split('-')
-                    top_audience_game['home_team'] = self.__process_team_cell(teams[0])
-                    top_audience_game['away_team'] = self.__process_team_cell(teams[1])
+                    top_audience_game['home_team'] = utils.to_unicode(teams[0].lower())
+                    top_audience_game['away_team'] = utils.to_unicode(teams[1].lower())
                 if 'asistentes' in header[j]:
                     top_audience_game['audience'] = table_columns[j].get_text(strip=True)
                 if 'estadio' in header[j]:
@@ -690,5 +693,3 @@ if __name__ == '__main__':
     )
     ret = ws.collect_championship_info(championship_test)
     pass
-
-# TODO: check process_final_status_table
