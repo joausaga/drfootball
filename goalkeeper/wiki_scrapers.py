@@ -31,11 +31,14 @@ class ChampionshipScraper:
     def __init__(self, url):
         self.url = url
 
-    def __update_teams_info(self, teams, teams_extra_info):
+    def __update_teams_info(self, teams, teams_extra_info, update_dict=True, new_key=''):
         for team in teams:
             for team_extra_info in teams_extra_info:
                 if team['name'] == team_extra_info['name']:
-                    team.update(team_extra_info)
+                    if update_dict:
+                        team.update(team_extra_info)
+                    else:
+                        team[new_key] = team_extra_info
                     break
 
     def __get_info_to_collect(self, championship):
@@ -59,7 +62,7 @@ class ChampionshipScraper:
                 season_statuses = self.__process_table_season_statuses(
                     self.__get_table_season_statuses(championship_year), championship_year
                 )
-                self.__update_teams_info(teams, season_statuses)
+                self.__update_teams_info(teams, season_statuses, False, 'season')
             if 'top scorers' in information_to_collect:
                 champ['top_scorers'] = self.__process_table_top_scorers(
                     self.__get_championship_top_scorers()
