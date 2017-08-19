@@ -32,14 +32,18 @@ class ChampionshipScraper:
         self.url = url
 
     def __update_teams_info(self, teams, teams_extra_info, update_dict=True, new_key=''):
-        for team in teams:
-            for team_extra_info in teams_extra_info:
-                if team['name'] == team_extra_info['name']:
-                    if update_dict:
-                        team.update(team_extra_info)
-                    else:
-                        team[new_key] = team_extra_info
-                    break
+        if teams:
+            for team in teams:
+                for team_extra_info in teams_extra_info:
+                    if team['name'] == team_extra_info['name']:
+                        if update_dict:
+                            team.update(team_extra_info)
+                        else:
+                            team[new_key] = team_extra_info
+                        break
+        else:
+            teams = teams_extra_info
+        return teams
 
     def __get_info_to_collect(self, championship):
         additional_info = championship['additional_info']
@@ -62,7 +66,7 @@ class ChampionshipScraper:
                 season_statuses = self.__process_table_season_statuses(
                     self.__get_table_season_statuses(championship_year), championship_year
                 )
-                self.__update_teams_info(teams, season_statuses, False, 'season')
+                teams = self.__update_teams_info(teams, season_statuses, False, 'season')
             if 'top scorers' in information_to_collect:
                 champ['top_scorers'] = self.__process_table_top_scorers(
                     self.__get_championship_top_scorers()
@@ -76,7 +80,7 @@ class ChampionshipScraper:
                 team_buyers = self.__process_table_team_buyers(
                     self.__get_table_team_buyers()
                 )
-                self.__update_teams_info(teams, team_buyers)
+                teams = self.__update_teams_info(teams, team_buyers)
             if 'game top audiences' in information_to_collect:
                 champ['top_audiences'] = self.__process_table_top_audience_games(
                     self.__get_info_games_large_audience()
@@ -85,7 +89,7 @@ class ChampionshipScraper:
                 team_cards = self.__process_table_team_cards(
                     self.__get_table_team_cards()
                 )
-                self.__update_teams_info(teams, team_cards)
+                teams = self.__update_teams_info(teams, team_cards)
             if 'referees' in information_to_collect:
                 champ['referees'] = self.__process_table_referees(
                     self.__get_referees_info()
@@ -94,7 +98,7 @@ class ChampionshipScraper:
                 team_audiences = self.__process_table_team_audience(
                     self.__get_table_audience()
                 )
-                self.__update_teams_info(teams, team_audiences)
+                teams = self.__update_teams_info(teams, team_audiences)
             return {
                 'championship': champ,
                 'teams' : teams
@@ -690,7 +694,7 @@ class ChampionshipScraper:
 
 if __name__ == '__main__':
     championship = read_championships_file('../data/campeonatos.csv')
-    championship_test = championship[0]
+    championship_test = championship[2]
     ws = ChampionshipScraper(
         url=championship_test['championship_source_url']
     )
