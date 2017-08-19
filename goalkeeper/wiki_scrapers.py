@@ -111,7 +111,7 @@ class ChampionshipScraper:
         team_tags = table_cell.find_all('a')
         team = {}
         for team_tag in team_tags:
-            if team_tag.has_key('title'):
+            if team_tag.has_attr('title'):
                 team_wikipage = team_tag['href']
                 team['name'] = utils.to_unicode(team_tag.get_text(strip=True).lower())
                 team['wikipage'] = self.prefix_url + team_wikipage if 'redlink' not in team_wikipage else ''
@@ -189,7 +189,7 @@ class ChampionshipScraper:
                 if 'estadio' in header[j]:
                     team['stadium'] = self.__process_stadium_cell(table_columns[j])
                 if 'capacidad' in header[j]:
-                    team['stadium']['capacity'] = table_columns[j].get_text(strip=True)
+                    team['stadium']['capacity'] = table_columns[j].get_text(strip=True).replace('.', '')
                 if 'fundacion' in header[j]:
                     team['foundation'] = self.__process_date_cell(table_columns[j])
                 if 'entrenador' in header[j]:
@@ -249,11 +249,11 @@ class ChampionshipScraper:
                 if 'equipos' in header[j]:
                     team.update(self.__process_team_cell(table_columns[j]))
                 if 'reacaudaci' in header[j]:
-                    team['income'] = table_columns[j].get_text(strip=True)
+                    team['income'] = table_columns[j].get_text(strip=True).replace(' ', '')
                 if 'pagantes' in header[j]:
-                    team['buyers'] = table_columns[j].get_text(strip=True)
+                    team['buyers'] = table_columns[j].get_text(strip=True).replace(' ', '')
                 if 'asistentes' in header[j]:
-                    team['audience'] = table_columns[j].get_text(strip=True)
+                    team['audience'] = table_columns[j].get_text(strip=True).replace(' ', '')
             team_audiences.append(team)
         return team_audiences
 
@@ -327,7 +327,7 @@ class ChampionshipScraper:
                 if 'pj' == header[j]:
                     team['games'] = table_columns[j].get_text(strip=True)
                 if 'as.' in header[j]:
-                    team['buyers'] = table_columns[j].get_text(strip=True)
+                    team['buyers'] = table_columns[j].get_text(strip=True).replace('.', '')
             team_buyers.append(team)
         return team_buyers
 
@@ -626,7 +626,7 @@ class ChampionshipScraper:
                     top_audience_game['home_team'] = utils.to_unicode(teams[0].lower())
                     top_audience_game['away_team'] = utils.to_unicode(teams[1].lower())
                 if 'asistentes' in header[j]:
-                    top_audience_game['audience'] = table_columns[j].get_text(strip=True)
+                    top_audience_game['audience'] = table_columns[j].get_text(strip=True).replace('.', '')
                 if 'estadio' in header[j]:
                     top_audience_game['stadium'] = self.__process_stadium_cell(table_columns[j])
                 if 'fecha' in header[j]:
@@ -687,7 +687,7 @@ class ChampionshipScraper:
 
 if __name__ == '__main__':
     championship = read_championships_file('../data/campeonatos.csv')
-    championship_test = championship[49]
+    championship_test = championship[0]
     ws = ChampionshipScraper(
         url=championship_test['championship_source_url']
     )
