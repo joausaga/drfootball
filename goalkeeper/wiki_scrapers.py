@@ -1,8 +1,8 @@
 __author__ = 'jorgesaldivar'
 
-import requests, utils
+import requests, utils, unicodedata, pytz
 from bs4 import BeautifulSoup
-from datetime import date
+from datetime import date, datetime
 from data_collector import read_championships_file
 
 
@@ -26,6 +26,8 @@ RED_HEX = '#ff4444;'
 class ParaguayanChampionshipResultsScraper:
     url = ''
     dom = None
+    py_timezone = pytz.timezone("America/Asuncion")
+    prefix_url = 'https://es.wikipedia.org'
 
     def __init__(self, url):
         self.url = url
@@ -48,7 +50,23 @@ class ParaguayanChampionshipResultsScraper:
                     game_tables.append(table)
         return game_tables
 
-    def __process_fixture_table(self, fixture_table):
+    def __process_game_date(self, table_cell, year):
+        date_info = table_cell.contents[0].lower().replace('de', '').split()
+        day = int(date_info[0])
+        month = utils.translate_spanish_month_letter_to_number(date_info[1])
+        return date(int(year), month, day).isoformat()
+
+    def __process_stadium_cell(self, table_cell):
+        stadium_tag = table_cell.find('a')
+        if stadium_tag:
+            stadium_wikipage = stadium_tag['href']
+            stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True).lower()),
+                       'wikipage': self.prefix_url + stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
+        else:
+            stadium = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
+        return stadium
+
+    def __process_fixture_table(self, fixture_table, year):
         game_results = []
         header = []
         # Process Table Headers
@@ -56,7 +74,9 @@ class ParaguayanChampionshipResultsScraper:
         for table_header in table_headers:
             if 'fecha' in table_header:
                 continue
-            header.append(table_header.get_text(strip=True).lower())
+            raw_header = table_header.get_text(strip=True).lower()
+            normalized_header = unicodedata.normalize('NFD', utils.to_unicode(raw_header)).encode('ascii', 'ignore')
+            header.append(normalized_header)
         # Process Table Rows
         table_rows = fixture_table.find_all('tr')
         num_rows = len(table_rows)
@@ -65,6 +85,8 @@ class ParaguayanChampionshipResultsScraper:
             num_cols = len(table_columns)
             game = {}
             for j in range(0, num_cols):
+                if table_columns[j].has_attr('rowspan'):
+                    pass
                 if 'equipo local' in header[j]:
                     game['home_team'] = {'name': utils.to_unicode(table_columns[j].get_text(strip=True).lower())}
                 if 'resultado' in header[j]:
@@ -73,6 +95,19 @@ class ParaguayanChampionshipResultsScraper:
                     game['away_team'] = {'goals': resultado[1]}
                 if 'equipo visitante' in header[j]:
                     game['away_team']['name'] = utils.to_unicode(table_columns[j].get_text(strip=True).lower())
+                if 'dia' in header[j]:
+                    game['date'] = self.__process_game_date(table_columns[j], year)
+                if 'hora' in header[j]:
+                    game_time = datetime.strptime(table_columns[j].get_text(strip=True), '%H:%M')
+                    game_date = datetime.strptime(game['date'], '%Y-%m-%d')
+                    game['datetime'] = datetime(game_date.year,game_date.month,game_date.day,
+                                                game_time.hour,game_time.minute,game_time.second)
+                    # localize game time as paraguayan timezone
+                    game['datetime'] = self.py_timezone.localize(game['datetime'])
+                if 'estadio' in header[j]:
+                    game['stadium'] = self.__process_stadium_cell(table_columns[j])
+
+
             game_results.append(game)
         return game_results
 
@@ -160,14 +195,6 @@ class ParaguayanChampionshipScraper:
         else:
             raise Exception('Request get the code ' + ret.status_code)
 
-    def __translante_month_letter_to_number(self, month_letter):
-        months = ['enero', 'febrero', 'marzo', 'abril', 'mayo',
-                  'junio', 'julio', 'agosto', 'septiembre',
-                  'octubre', 'noviembre', 'diciembre']
-        for idx in range(0, 12):
-            if months[idx] == month_letter:
-                return idx+1
-
     def __process_team_cell(self, table_cell):
         team_tags = table_cell.find_all('a')
         team = {}
@@ -197,14 +224,14 @@ class ParaguayanChampionshipScraper:
     def __process_coach_substitution_date_cell(self, table_cell, year):
         date_info = table_cell.contents[0].lower().replace('de', '').split()
         day = int(date_info[0])
-        month = self.__translante_month_letter_to_number(date_info[1])
+        month = utils.translate_spanish_month_letter_to_number(date_info[1])
         return date(int(year), month, day).isoformat()
 
     def __process_date_cell(self, table_cell):
         date_links = table_cell.find_all('a')
         day_month = date_links[0].get_text(strip=True).lower().replace('de', '').split()
         day = int(day_month[0])
-        month = self.__translante_month_letter_to_number(day_month[1])
+        month = utils.translate_spanish_month_letter_to_number(day_month[1])
         year = int(date_links[1].get_text(strip=True).lower())
         return date(year, month, day).isoformat()
 
@@ -749,7 +776,7 @@ class ParaguayanChampionshipScraper:
 if __name__ == '__main__':
     championship = read_championships_file('../data/campeonatos.csv')
     championship_test = championship[2]
-    ws = ChampionshipScraper(
+    ws = ParaguayanChampionshipScraper(
         url=championship_test['championship_source_url']
     )
     ret = ws.collect_championship_info(championship_test)
