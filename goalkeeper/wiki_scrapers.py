@@ -66,49 +66,114 @@ class ParaguayanChampionshipResultsScraper:
             stadium = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
         return stadium
 
-    def __process_fixture_table(self, fixture_table, year):
-        game_results = []
-        header = []
-        # Process Table Headers
-        table_headers = fixture_table.find_all('th')
+    def __insert_content_in_row_array(self, content, array):
+        # Insert content in the first empty (None) place of the array
+        array_length = len(array)
+        for i in range(0, array_length):
+            if array[i] is None:
+                array[i] = content
+                return array
+
+    def __table_to_matrix(self, table):
+        table_matrix = []
+        # Save table header
+        row_header = []
+        table_headers = table.find_all('th')
         for table_header in table_headers:
             if 'fecha' in table_header:
                 continue
-            raw_header = table_header.get_text(strip=True).lower()
-            normalized_header = unicodedata.normalize('NFD', utils.to_unicode(raw_header)).encode('ascii', 'ignore')
-            header.append(normalized_header)
-        # Process Table Rows
-        table_rows = fixture_table.find_all('tr')
-        num_rows = len(table_rows)
+            row_header.append({
+                'content': utils.normalize_text(table_header.get_text(strip=True).lower()),
+                'repeat_for': 0
+            })
+        num_col_table = len(row_header)
+        table_matrix.append(row_header)
+        # Save table body
+        rows = table.find_all('tr')
+        num_rows = len(rows)
+        span_contents = []
         for i in range(2, num_rows):
-            table_columns = table_rows[i].find_all('td')
-            num_cols = len(table_columns)
-            game = {}
-            for j in range(0, num_cols):
-                if table_columns[j].has_attr('rowspan'):
-                    pass
-                if 'equipo local' in header[j]:
-                    game['home_team'] = {'name': utils.to_unicode(table_columns[j].get_text(strip=True).lower())}
-                if 'resultado' in header[j]:
-                    resultado = table_columns[j].get_text(strip=True).split('-')
-                    game['home_team']['goals'] = resultado[0]
-                    game['away_team'] = {'goals': resultado[1]}
-                if 'equipo visitante' in header[j]:
-                    game['away_team']['name'] = utils.to_unicode(table_columns[j].get_text(strip=True).lower())
-                if 'dia' in header[j]:
-                    game['date'] = self.__process_game_date(table_columns[j], year)
-                if 'hora' in header[j]:
-                    game_time = datetime.strptime(table_columns[j].get_text(strip=True), '%H:%M')
-                    game_date = datetime.strptime(game['date'], '%Y-%m-%d')
-                    game['datetime'] = datetime(game_date.year,game_date.month,game_date.day,
-                                                game_time.hour,game_time.minute,game_time.second)
-                    # localize game time as paraguayan timezone
-                    game['datetime'] = self.py_timezone.localize(game['datetime'])
-                if 'estadio' in header[j]:
-                    game['stadium'] = self.__process_stadium_cell(table_columns[j])
+            row_body = [None] * num_col_table
+            columns = rows[i].find_all('td')
+            num_col_row = len(columns)
+            if num_col_row < num_col_table:
+                for span_content in span_contents:
+                    if i in span_content['affected_rows']:
+                        row_body[span_content['col']] = span_content['content']
+            for j in range(0, num_col_row):
+                if columns[j].has_attr('rowspan'):
+                    span_contents.append({
+                        'content': utils.to_unicode(columns[j].get_text(strip=True).lower()),
+                        'affected_rows': list(range(i, i+int(columns[j]['rowspan']))),
+                        'col': j
+                    })
+                col_content = utils.to_unicode(columns[j].get_text(strip=True).lower())
+                row_body = self.__insert_content_in_row_array(col_content, row_body)
+            table_matrix.append(row_body)
 
+        return table_matrix
 
-            game_results.append(game)
+    # continue: from here
+    def __process_goal_scorers(self, scorers_str):
+        if ' y ' in scorers_str:
+            pass
+        else:
+            pass
+
+    def __process_game_goals(self, game_goals_str, game_result):
+        goal_str = game_goals_str.split(':')
+        if '-' in goal_str[1]:
+            home_goal_scorers_str = goal_str[1].split('-')[0]
+            away_goal_scorers_str = goal_str[1].split('-')[1]
+            home_goal_scorers_str = home_goal_scorers_str.replace(' y ', ' , ')
+            away_goal_scorers_str = away_goal_scorers_str.replace(' y ', ' , ')
+            home_goal_scorers = home_goal_scorers_str.strip(',').strip()
+            away_goal_scorers = away_goal_scorers_str.strip(',').strip()
+        else:
+            if game_result['home_team']['goals'] > 0:
+                pass
+            else:
+                pass
+
+        return True
+
+    def __process_fixture_table(self, fixture_table, year):
+        game_results = []
+        matrix_table = self.__table_to_matrix(fixture_table)
+        num_rows = len(matrix_table)
+        headers = matrix_table[0]
+        for i in range(1, num_rows):
+            row_num_cols = len(matrix_table[i])
+            if row_num_cols < len(headers):
+                # process goal row
+                for j in range(0, row_num_cols):
+                    if 'gol' in matrix_table[i][j]:
+                        game_results[i - 1]['result'] = self.__process_game_goals(matrix_table[i][j],
+                                                                                  game_results[i-1]['result'])
+            else:
+                game = {}
+                for j in range(0, row_num_cols):
+                    if 'equipo local' in headers[j]:
+                        game['home_team'] = matrix_table[i][j]
+                    if 'resultado' in headers[j]:
+                        resultado = matrix_table[i][j].split('-')
+                        game['result'] = {'home_team': {'goals': int(resultado[0])},
+                                          'away_team': {'goals': int(resultado[1])}}
+                    if 'equipo visitante' in headers[j]:
+                        game['away_team'] = matrix_table[i][j]
+                    if 'dia' in headers[j]:
+                        game['date'] = self.__process_game_date(matrix_table[i][j], year)
+                    if 'hora' in headers[j]:
+                        game_time = datetime.strptime(matrix_table[i][j], '%H:%M')
+                        game_date = datetime.strptime(game['date'], '%Y-%m-%d')
+                        game['datetime'] = datetime(game_date.year,game_date.month,game_date.day,
+                                                    game_time.hour,game_time.minute,game_time.second)
+                        # localize game time as paraguayan timezone
+                        game['datetime'] = self.py_timezone.localize(game['datetime'])
+                    if 'estadio' in headers[j]:
+                        game['stadium'] = self.__process_stadium_cell(matrix_table[i][j])
+                game_results.append(game)
+
         return game_results
 
 
