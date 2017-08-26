@@ -113,29 +113,71 @@ class ParaguayanChampionshipResultsScraper:
 
         return table_matrix
 
-    # continue: from here
-    def __process_goal_scorers(self, scorers_str):
-        if ' y ' in scorers_str:
-            pass
+    def __process_goal_scorer(self, scorer_str):
+        num_goals, num_penalties = 1, 0
+        goals = []
+        if '(e/c)' in scorer_str:
+            scorer_str = scorer_str.replace('(e/c)', '')
+            goals.append({'author': scorer_str.strip(), 'type': 'own goal'})
         else:
-            pass
+            if '(' in scorer_str:
+                # means that the scorer made more than one goal
+                # and/or made a penalty goal
+                sc = scorer_str.split('(')
+                author = sc[0].strip()
+                sc = sc[1].replace(')', '')
+                if ';' in sc:
+                    sp_sc = sc.split(';')
+                    num_goals = int(sp_sc[0])
+                    if sc[1].replace('p', '').strip().isdigit():
+                        num_penalties = int(sc[1].replace('p', '').strip())
+                    else:
+                        num_penalties = 1
+                else:
+                    if 'p' not in sc:
+                        num_goals = int(sc)
+                    else:
+                        num_penalties = 1
+                for c_goal in range(0, num_goals):
+                    if num_penalties > 0:
+                        goals.append({'author': author, 'type': 'penalty'})
+                        num_penalties -= num_penalties - 1
+                    else:
+                        goals.append({'author': author, 'type': ''})
+            else:
+                goals.append({'author': scorer_str.strip(), 'type': ''})
+        return goals
+
+    def __process_goal_scorers(self, scorers_str):
+        scorers = []
+        if ' y ' in scorers_str or ' e ' in scorers_str:
+            raw_scorers = scorers_str.split(' y ')
+            for scorer in raw_scorers:
+                if ',' in scorer:
+                    for sc in scorer.split(','):
+                        scorers.extend(self.__process_goal_scorer(sc))
+                else:
+                    scorers.extend(self.__process_goal_scorer(scorer))
+        else:
+            scorers.extend(self.__process_goal_scorer(scorers_str))
+
+        return scorers
 
     def __process_game_goals(self, game_goals_str, game_result):
         goal_str = game_goals_str.split(':')
         if '-' in goal_str[1]:
             home_goal_scorers_str = goal_str[1].split('-')[0]
             away_goal_scorers_str = goal_str[1].split('-')[1]
-            home_goal_scorers_str = home_goal_scorers_str.replace(' y ', ' , ')
-            away_goal_scorers_str = away_goal_scorers_str.replace(' y ', ' , ')
-            home_goal_scorers = home_goal_scorers_str.strip(',').strip()
-            away_goal_scorers = away_goal_scorers_str.strip(',').strip()
+            home_goals = self.__process_goal_scorers(home_goal_scorers_str)
+            away_goals = self.__process_goal_scorers(away_goal_scorers_str)
+            return {'home_goals': home_goals, 'away_goals': away_goals}
         else:
             if game_result['home_team']['goals'] > 0:
-                pass
+                home_goals = self.__process_goal_scorers(goal_str[1])
+                return {'home_goals': home_goals}
             else:
-                pass
-
-        return True
+                away_goals = self.__process_goal_scorers(goal_str[1])
+                return {'away_goals': away_goals}
 
     def __process_fixture_table(self, fixture_table, year):
         game_results = []
