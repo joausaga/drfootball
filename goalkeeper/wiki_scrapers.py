@@ -1,6 +1,6 @@
 __author__ = 'jorgesaldivar'
 
-import requests, utils, unicodedata, pytz
+import requests, utils, unicodedata, pytz, re
 from bs4 import BeautifulSoup
 from datetime import date, datetime
 from data_collector import read_championships_file
@@ -28,42 +28,55 @@ class ParaguayanChampionshipResultsScraper:
     dom = None
     py_timezone = pytz.timezone("America/Asuncion")
     prefix_url = 'https://es.wikipedia.org'
+    num_pattern = re.compile('[^0-9]')
+    alpha_pattern = re.compile('[^a-zA-Z\s]')
 
     def __init__(self, url):
         self.url = url
 
     def collect_championship_results(self, championship):
         ret_rq = requests.get(self.url)
+        fixture_results = []
         if ret_rq.status_code == 200:
             self.dom = BeautifulSoup(ret_rq.text, 'html.parser')
+            championship_year = championship['year']
+            fixture_tables = self.__get_fixture_tables()
+            for fixture_table in fixture_tables:
+                fixture_results.append(self.__process_fixture_table(fixture_table, championship_year))
+        return fixture_results
 
     def __get_fixture_tables(self):
         tables = self.dom.find_all('table')
         game_tables = []
         for table in tables:
-            if table.has_attr['width'] and table['width'] == '100%':
+            if table.has_attr('width') and table['width'] == '100%':
                 continue
             table_headers = table.find_all('th')
             for table_header in table_headers:
                 header_content = table_header.get_text(strip=True).lower()
                 if 'fecha' in header_content:
                     game_tables.append(table)
+                elif 'goles' in header_content:
+                    game_tables.append(table)
         return game_tables
 
     def __process_game_date(self, table_cell, year):
-        date_info = table_cell.contents[0].lower().replace('de', '').split()
+        try:
+            date_info = table_cell.contents[0].lower().replace('de', '').split()
+        except:
+            date_info = table_cell.lower().replace('de', '').split()
         day = int(date_info[0])
         month = utils.translate_spanish_month_letter_to_number(date_info[1])
         return date(int(year), month, day).isoformat()
 
     def __process_stadium_cell(self, table_cell):
-        stadium_tag = table_cell.find('a')
-        if stadium_tag:
+        try:
+            stadium_tag = table_cell.a
             stadium_wikipage = stadium_tag['href']
-            stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True).lower()),
+            stadium = {'name': utils.to_unicode(stadium_tag.get_text(strip=True)),
                        'wikipage': self.prefix_url + stadium_wikipage if 'redlink' not in stadium_wikipage else ''}
-        else:
-            stadium = {'name': utils.to_unicode(table_cell.get_text(strip=True).lower())}
+        except:
+            stadium = {'name': utils.to_unicode(table_cell)}
         return stadium
 
     def __insert_content_in_row_array(self, content, array):
@@ -74,18 +87,47 @@ class ParaguayanChampionshipResultsScraper:
                 array[i] = content
                 return array
 
+    def __get_column_for_content(self, type_content):
+        if type_content == 'fecha':
+            return 0
+        elif type_content == 'hora':
+            return 1
+        else:
+            return 2
+
+    def __identify_type_content(self, content):
+        if ' de ' in content:
+            return 'fecha'
+        elif ':' in content:
+            return 'hora'
+        else:
+            return 'estadio'
+
     def __table_to_matrix(self, table):
         table_matrix = []
         # Save table header
         row_header = []
         table_headers = table.find_all('th')
         for table_header in table_headers:
-            if 'fecha' in table_header:
+            if 'fecha' in table_header.get_text(strip=True).lower():
                 continue
-            row_header.append({
-                'content': utils.normalize_text(table_header.get_text(strip=True).lower()),
-                'repeat_for': 0
-            })
+            if table_header.get_text(strip=True) != '':
+                row_header.append({
+                    'content': utils.normalize_text(table_header.get_text(strip=True).lower()),
+                    'repeat_for': 0
+                })
+            else:
+                if table_header.a != '':
+                    if table_header.a['title'].lower() == 'Amonestaciones':
+                        row_header.append({
+                            'content': 'tarjetas amarillas',
+                            'repeat_for': 0
+                        })
+                    if table_header.a['title'].lower() == 'Expulsiones':
+                        row_header.append({
+                            'content': 'tarjetas rojas',
+                            'repeat_for': 0
+                        })
         num_col_table = len(row_header)
         table_matrix.append(row_header)
         # Save table body
@@ -101,24 +143,45 @@ class ParaguayanChampionshipResultsScraper:
                     if i in span_content['affected_rows']:
                         row_body[span_content['col']] = span_content['content']
             for j in range(0, num_col_row):
+                content = utils.to_unicode(columns[j].get_text().lower())
+                content = content.replace(u'\xa0', u' ')  # Remove unicode representation of blank space (\xa0)
+                if u'\u200b' in content:
+                    idx_square_bracket = content.find('[')
+                    content = content[0:idx_square_bracket]
                 if columns[j].has_attr('rowspan'):
                     span_contents.append({
-                        'content': utils.to_unicode(columns[j].get_text(strip=True).lower()),
+                        'content': content.strip(),
                         'affected_rows': list(range(i, i+int(columns[j]['rowspan']))),
-                        'col': j
+                        'col': self.__get_column_for_content(self.__identify_type_content(content))
                     })
-                col_content = utils.to_unicode(columns[j].get_text(strip=True).lower())
-                row_body = self.__insert_content_in_row_array(col_content, row_body)
+                row_body = self.__insert_content_in_row_array(content.strip(), row_body)
             table_matrix.append(row_body)
 
         return table_matrix
 
+    def __process_goal_minute(self, scorer_str):
+        if '+' in scorer_str:
+            arr_m = scorer_str.split('+')
+            arr_m[0] = int(self.num_pattern.sub('', arr_m[0]))
+            arr_m[1] = int(self.num_pattern.sub('', arr_m[1]))
+            minute = str(arr_m[0] + arr_m[1])
+        else:
+            minute = self.num_pattern.sub('', scorer_str)
+
+        return minute
+
     def __process_goal_scorer(self, scorer_str):
         num_goals, num_penalties = 1, 0
         goals = []
-        if '(e/c)' in scorer_str:
+
+        if '(e/c)' in scorer_str or '(a.g.)' in scorer_str:
             scorer_str = scorer_str.replace('(e/c)', '')
-            goals.append({'author': scorer_str.strip(), 'type': 'own goal'})
+            minute = self.__process_goal_minute(scorer_str) if "'" in scorer_str else ''
+            if minute != '':
+                goals.append({'author': scorer_str.strip(), 'type': 'own goal',
+                              'minute': minute})
+            else:
+                goals.append({'author': scorer_str.strip(), 'type': 'own goal'})
         else:
             if '(' in scorer_str:
                 # means that the scorer made more than one goal
@@ -137,7 +200,8 @@ class ParaguayanChampionshipResultsScraper:
                     if 'p' not in sc:
                         num_goals = int(sc)
                     else:
-                        num_penalties = 1
+                        if 'p' in sc or 'pen' in sc:
+                            num_penalties = 1
                 for c_goal in range(0, num_goals):
                     if num_penalties > 0:
                         goals.append({'author': author, 'type': 'penalty'})
@@ -145,7 +209,30 @@ class ParaguayanChampionshipResultsScraper:
                     else:
                         goals.append({'author': author, 'type': ''})
             else:
-                goals.append({'author': scorer_str.strip(), 'type': ''})
+                if ',' in scorer_str:
+                    goals_author = self.alpha_pattern.sub('', scorer_str).replace('pen', '').strip()
+                    fnum = re.search('\d', scorer_str)
+                    if fnum:
+                        goals_info = scorer_str[fnum.start():len(scorer_str)]
+                        goals_arr = goals_info.split(',')
+                        for goal_info in goals_arr:
+                            if '(pen)' in goal_info:
+                                type_goal = 'penalty'
+                            else:
+                                type_goal = ''
+                            minute = self.__process_goal_minute(goal_info)
+                            if minute:
+                                goals.append({'author': goals_author,'type': type_goal})
+                            else:
+                                goals.append({'author': goals_author, 'type': type_goal,
+                                              'minute': minute})
+                else:
+                    minute = self.__process_goal_minute(scorer_str) if "'" in scorer_str else ''
+                    if minute != '':
+                        goals.append({'author': scorer_str.strip(), 'type': '',
+                                      'minute': minute})
+                    else:
+                        goals.append({'author': scorer_str.strip(), 'type': ''})
         return goals
 
     def __process_goal_scorers(self, scorers_str):
@@ -186,34 +273,47 @@ class ParaguayanChampionshipResultsScraper:
         headers = matrix_table[0]
         for i in range(1, num_rows):
             row_num_cols = len(matrix_table[i])
-            if row_num_cols < len(headers):
+            if None in matrix_table[i]:
                 # process goal row
                 for j in range(0, row_num_cols):
-                    if 'gol' in matrix_table[i][j]:
-                        game_results[i - 1]['result'] = self.__process_game_goals(matrix_table[i][j],
-                                                                                  game_results[i-1]['result'])
+                    if matrix_table[i][j] and 'gol' in matrix_table[i][j]:
+                        n = len(game_results)
+                        game_results[n-1]['goals'] = self.__process_game_goals(matrix_table[i][j],
+                                                                               game_results[n-1]['result'])
             else:
                 game = {}
                 for j in range(0, row_num_cols):
-                    if 'equipo local' in headers[j]:
-                        game['home_team'] = matrix_table[i][j]
-                    if 'resultado' in headers[j]:
+                    if 'equipo local' in headers[j]['content']:
+                        game['home_team'] = {'name': matrix_table[i][j]}
+                    if 'resultado' in headers[j]['content']:
                         resultado = matrix_table[i][j].split('-')
                         game['result'] = {'home_team': {'goals': int(resultado[0])},
                                           'away_team': {'goals': int(resultado[1])}}
-                    if 'equipo visitante' in headers[j]:
-                        game['away_team'] = matrix_table[i][j]
-                    if 'dia' in headers[j]:
+                    if 'equipo visitante' in headers[j]['content']:
+                        game['away_team'] = {'name': matrix_table[i][j]}
+                    if 'dia' in headers[j]['content']:
                         game['date'] = self.__process_game_date(matrix_table[i][j], year)
-                    if 'hora' in headers[j]:
+                    if 'hora' in headers[j]['content']:
                         game_time = datetime.strptime(matrix_table[i][j], '%H:%M')
                         game_date = datetime.strptime(game['date'], '%Y-%m-%d')
                         game['datetime'] = datetime(game_date.year,game_date.month,game_date.day,
                                                     game_time.hour,game_time.minute,game_time.second)
-                        # localize game time as paraguayan timezone
+                        # localize game time to paraguayan timezone
                         game['datetime'] = self.py_timezone.localize(game['datetime'])
-                    if 'estadio' in headers[j]:
+                    if 'estadio' in headers[j]['content']:
                         game['stadium'] = self.__process_stadium_cell(matrix_table[i][j])
+                    if 'asistencia' in headers[j]['content']:
+                        game['audience'] = matrix_table[i][j]
+                    if 'arbitro' in headers[j]['content']:
+                        game['referee'] = matrix_table[i][j]
+                    if 'tarjetas amarillas' in headers[j]['content']:
+                        yellow_cards = matrix_table[i][j].split('/')
+                        game['home_team']['yellow_cards'] = yellow_cards[0].strip()
+                        game['away_team']['yellow_cards'] = yellow_cards[1].strip()
+                    if 'tarjetas rojas' in headers[j]['content']:
+                        red_cards = matrix_table[i][j].split('/')
+                        game['home_team']['red_cards'] = red_cards[0].strip()
+                        game['away_team']['red_cards'] = red_cards[1].strip()
                 game_results.append(game)
 
         return game_results
@@ -882,9 +982,9 @@ class ParaguayanChampionshipScraper:
 
 if __name__ == '__main__':
     championship = read_championships_file('../data/campeonatos.csv')
-    championship_test = championship[2]
-    ws = ParaguayanChampionshipScraper(
-        url=championship_test['championship_source_url']
+    championship_test = championship[44]
+    ws = ParaguayanChampionshipResultsScraper(
+        url=championship_test['results']
     )
-    ret = ws.collect_championship_info(championship_test)
+    ret = ws.collect_championship_results(championship_test)
     pass
