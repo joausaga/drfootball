@@ -87,19 +87,25 @@ class ParaguayanChampionshipResultsScraper:
                 array[i] = content
                 return array
 
-    def __get_column_for_content(self, type_content):
-        if type_content == 'fecha':
-            return 0
-        elif type_content == 'hora':
-            return 1
-        else:
-            return 2
+    def __get_column_for_content(self, type_content, headers):
+        m_h = len(headers)
+        for i in range(0, m_h):
+            header = headers[i]
+            if header['content'] == type_content:
+                return i
 
     def __identify_type_content(self, content):
         if ' de ' in content:
-            return 'fecha'
+            return 'dia'
         elif ':' in content:
             return 'hora'
+        elif '.' in content:
+            content = content.replace('.', '')
+            try:
+                int(content)
+                return 'asistencia'
+            except:
+                return 'estadio'
         else:
             return 'estadio'
 
@@ -110,6 +116,8 @@ class ParaguayanChampionshipResultsScraper:
         table_headers = table.find_all('th')
         for table_header in table_headers:
             if 'fecha' in table_header.get_text(strip=True).lower():
+                continue
+            if 'goles' in table_header.get_text(strip=True).lower():
                 continue
             if table_header.get_text(strip=True) != '':
                 row_header.append({
@@ -143,6 +151,9 @@ class ParaguayanChampionshipResultsScraper:
                     if i in span_content['affected_rows']:
                         row_body[span_content['col']] = span_content['content']
             for j in range(0, num_col_row):
+                sup = columns[j].sup
+                if sup:
+                    sup.string = ''
                 content = utils.to_unicode(columns[j].get_text().lower())
                 content = content.replace(u'\xa0', u' ')  # Remove unicode representation of blank space (\xa0)
                 if u'\u200b' in content:
@@ -152,7 +163,7 @@ class ParaguayanChampionshipResultsScraper:
                     span_contents.append({
                         'content': content.strip(),
                         'affected_rows': list(range(i, i+int(columns[j]['rowspan']))),
-                        'col': self.__get_column_for_content(self.__identify_type_content(content))
+                        'col': self.__get_column_for_content(self.__identify_type_content(content), row_header)
                     })
                 row_body = self.__insert_content_in_row_array(content.strip(), row_body)
             table_matrix.append(row_body)
