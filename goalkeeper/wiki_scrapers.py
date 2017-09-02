@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-s
+
 __author__ = 'jorgesaldivar'
 
 import requests, utils, unicodedata, pytz, re
@@ -28,11 +30,13 @@ class ParaguayanChampionshipResultsScraper:
     dom = None
     py_timezone = pytz.timezone("America/Asuncion")
     prefix_url = 'https://es.wikipedia.org'
-    num_pattern = re.compile('[^0-9]')
-    alpha_pattern = re.compile('[^a-zA-Z\s]')
+    num_pattern = ''
+    alpha_pattern = ''
 
     def __init__(self, url):
         self.url = url
+        self.num_pattern = re.compile('[^0-9]')
+        self.alpha_pattern = re.compile(r'[^A-Za-z\s]', re.UNICODE)
 
     def collect_championship_results(self, championship):
         ret_rq = requests.get(self.url)
@@ -91,23 +95,28 @@ class ParaguayanChampionshipResultsScraper:
         m_h = len(headers)
         for i in range(0, m_h):
             header = headers[i]
-            if header['content'] == type_content:
+            if header['content'] in type_content:
                 return i
 
-    def __identify_type_content(self, content):
+    def __identify_type_content(self, content, pos_std, pos_yc):
         if ' de ' in content:
             return 'dia'
         elif ':' in content:
             return 'hora'
-        elif '.' in content:
-            content = content.replace('.', '')
-            try:
-                int(content)
-                return 'asistencia'
-            except:
-                return 'estadio'
+        elif '/' in content:
+            if pos_yc == 0:
+                return 'tarjetas amarillas'
+            else:
+                return 'tarjetas rojas'
         else:
-            return 'estadio'
+            content = content.replace('.', '')
+            if content.isdigit():
+                return 'asistencia o pagantes'
+            else:
+                if pos_std == 0:
+                    return 'estadio'
+                else:
+                    return 'arbitro'
 
     def __table_to_matrix(self, table):
         table_matrix = []
@@ -120,18 +129,20 @@ class ParaguayanChampionshipResultsScraper:
             if 'goles' in table_header.get_text(strip=True).lower():
                 continue
             if table_header.get_text(strip=True) != '':
+                if table_header.sup:
+                    table_header.sup.clear()
                 row_header.append({
                     'content': utils.normalize_text(table_header.get_text(strip=True).lower()),
                     'repeat_for': 0
                 })
             else:
-                if table_header.a != '':
-                    if table_header.a['title'].lower() == 'Amonestaciones':
+                if table_header.a:
+                    if 'amonestaciones' in table_header.a['title'].lower():
                         row_header.append({
                             'content': 'tarjetas amarillas',
                             'repeat_for': 0
                         })
-                    if table_header.a['title'].lower() == 'Expulsiones':
+                    if 'expulsiones' in table_header.a['title'].lower():
                         row_header.append({
                             'content': 'tarjetas rojas',
                             'repeat_for': 0
@@ -146,24 +157,32 @@ class ParaguayanChampionshipResultsScraper:
             row_body = [None] * num_col_table
             columns = rows[i].find_all('td')
             num_col_row = len(columns)
+            pos_std, pos_yc = 0, 0
             if num_col_row < num_col_table:
                 for span_content in span_contents:
                     if i in span_content['affected_rows']:
                         row_body[span_content['col']] = span_content['content']
             for j in range(0, num_col_row):
-                sup = columns[j].sup
-                if sup:
-                    sup.string = ''
+                if columns[j].sup:
+                    columns[j].sup.clear()
                 content = utils.to_unicode(columns[j].get_text().lower())
                 content = content.replace(u'\xa0', u' ')  # Remove unicode representation of blank space (\xa0)
                 if u'\u200b' in content:
                     idx_square_bracket = content.find('[')
                     content = content[0:idx_square_bracket]
+                if u'\u200b' in content:
+                    content = content.replace(u'\u200b', u'')
+                content = content.replace('\n', ' ')
                 if columns[j].has_attr('rowspan'):
+                    type_content = self.__identify_type_content(content, pos_std, pos_yc)
+                    if type_content == 'tarjetas amarillas':
+                        pos_yc = 1
+                    if type_content == 'estadio':
+                        pos_std = 1
                     span_contents.append({
                         'content': content.strip(),
                         'affected_rows': list(range(i, i+int(columns[j]['rowspan']))),
-                        'col': self.__get_column_for_content(self.__identify_type_content(content), row_header)
+                        'col': self.__get_column_for_content(type_content, row_header)
                     })
                 row_body = self.__insert_content_in_row_array(content.strip(), row_body)
             table_matrix.append(row_body)
@@ -181,18 +200,30 @@ class ParaguayanChampionshipResultsScraper:
 
         return minute
 
+    def __get_goal_author_game(self, raw_author_name):
+        n_author_name = utils.normalize_text(raw_author_name)
+        n_author_name = self.alpha_pattern.sub('', n_author_name).strip()
+        return raw_author_name[0: len(n_author_name)]
+
     def __process_goal_scorer(self, scorer_str):
         num_goals, num_penalties = 1, 0
         goals = []
 
-        if '(e/c)' in scorer_str or '(a.g.)' in scorer_str:
-            scorer_str = scorer_str.replace('(e/c)', '')
-            minute = self.__process_goal_minute(scorer_str) if "'" in scorer_str else ''
-            if minute != '':
-                goals.append({'author': scorer_str.strip(), 'type': 'own goal',
-                              'minute': minute})
-            else:
-                goals.append({'author': scorer_str.strip(), 'type': 'own goal'})
+        if 'e/c)' in scorer_str or 'a.g.)' in scorer_str:
+            scorer_str = scorer_str.replace('e/c)', '')
+            scorer_str = scorer_str.replace('a.g.)', '')
+            idx_bracket = scorer_str.find('(')
+            num_ec = scorer_str[idx_bracket: len(scorer_str)]
+            scorer_str = scorer_str[0:idx_bracket]
+            num_ec = num_ec.replace('(', '').strip()
+            num_ec = int(num_ec) if num_ec else 1
+            for c_goal in range(0, num_ec):
+                minute = self.__process_goal_minute(scorer_str) if "'" in scorer_str else ''
+                author = self.__get_goal_author_game(scorer_str).strip()
+                goal = {'author': author, 'type': 'own goal'}
+                if minute:
+                    goal['minute'] = minute
+                goals.append(goal)
         else:
             if '(' in scorer_str:
                 # means that the scorer made more than one goal
@@ -208,20 +239,32 @@ class ParaguayanChampionshipResultsScraper:
                     else:
                         num_penalties = 1
                 else:
-                    if 'p' not in sc:
+                    if sc.isdigit():
                         num_goals = int(sc)
                     else:
                         if 'p' in sc or 'pen' in sc:
-                            num_penalties = 1
+                            sc = sc.replace('pen', '').replace('p', '').replace('.','')
+                            if sc:
+                                num_penalties = num_goals = int(sc)
+                            else:
+                                num_penalties = num_goals = 1
+                        else:
+                            author += ' ({0})'.format(sc)   # assume that sc contains the nickname of the author
                 for c_goal in range(0, num_goals):
+                    minute = self.__process_goal_minute(author) if "'" in scorer_str else ''
+                    author = self.__get_goal_author_game(scorer_str).strip()
+                    goal = {'author': author}
+                    if minute:
+                        goal['minute'] = minute
                     if num_penalties > 0:
-                        goals.append({'author': author, 'type': 'penalty'})
-                        num_penalties -= num_penalties - 1
+                        num_penalties -= 1
+                        goal['type'] = 'penalty'
                     else:
-                        goals.append({'author': author, 'type': ''})
+                        goal['type'] = ''
+                    goals.append(goal)
             else:
                 if ',' in scorer_str:
-                    goals_author = self.alpha_pattern.sub('', scorer_str).replace('pen', '').strip()
+                    author = self.__get_goal_author_game(scorer_str).replace('pen', '').strip()
                     fnum = re.search('\d', scorer_str)
                     if fnum:
                         goals_info = scorer_str[fnum.start():len(scorer_str)]
@@ -231,51 +274,79 @@ class ParaguayanChampionshipResultsScraper:
                                 type_goal = 'penalty'
                             else:
                                 type_goal = ''
+                            goal = {'author': author,'type': type_goal}
                             minute = self.__process_goal_minute(goal_info)
                             if minute:
-                                goals.append({'author': goals_author,'type': type_goal})
-                            else:
-                                goals.append({'author': goals_author, 'type': type_goal,
-                                              'minute': minute})
+                                goal['minute'] = minute
+                            goals.append(goal)
                 else:
                     minute = self.__process_goal_minute(scorer_str) if "'" in scorer_str else ''
-                    if minute != '':
-                        goals.append({'author': scorer_str.strip(), 'type': '',
-                                      'minute': minute})
-                    else:
-                        goals.append({'author': scorer_str.strip(), 'type': ''})
+                    author = self.__get_goal_author_game(scorer_str).strip()
+                    goal = {'author': author, 'type': ''}
+                    if minute:
+                        goal['minute'] = minute
+                    goals.append(goal)
         return goals
+
+    def __check_name_goal_author_presence(self, str):
+        n_author_name = utils.normalize_text(str).strip()
+        n_author_name = self.alpha_pattern.sub('', n_author_name)
+        if n_author_name:
+            return True
+        else:
+            return False
 
     def __process_goal_scorers(self, scorers_str):
         scorers = []
-        if ' y ' in scorers_str or ' e ' in scorers_str:
-            raw_scorers = scorers_str.split(' y ')
-            for scorer in raw_scorers:
-                if ',' in scorer:
-                    for sc in scorer.split(','):
-                        scorers.extend(self.__process_goal_scorer(sc))
+        raw_scorers = scorers_str.split(',')
+        num_scorers = len(raw_scorers)
+        idx = 0
+        while idx < num_scorers:
+            if ' y ' in raw_scorers[idx]:
+                rs = raw_scorers.pop(idx).split(' y ')
+                raw_scorers.extend(rs)
+                num_scorers = len(raw_scorers)
+            elif ' e ' in raw_scorers[idx]:
+                rs = raw_scorers.pop(idx).split(' e ')
+                raw_scorers.extend(rs)
+                num_scorers = len(raw_scorers)
+            else:
+                str_scorer = raw_scorers[idx].strip()
+                if self.__check_name_goal_author_presence(str_scorer):
+                    scorers.extend(self.__process_goal_scorer(str_scorer))
                 else:
-                    scorers.extend(self.__process_goal_scorer(scorer))
-        else:
-            scorers.extend(self.__process_goal_scorer(scorers_str))
+                    goal_author = self.__get_goal_author_game(raw_scorers[idx-1]).strip()
+                    raw_scorers[idx] = goal_author + ' ' + str_scorer
+                    scorers.extend(self.__process_goal_scorer(raw_scorers[idx]))
+                idx += 1
 
         return scorers
 
     def __process_game_goals(self, game_goals_str, game_result):
         goal_str = game_goals_str.split(':')
+        home_goals, away_goals = [], []
+        ok_home_goals, ok_away_goals = False, False
         if '-' in goal_str[1]:
-            home_goal_scorers_str = goal_str[1].split('-')[0]
-            away_goal_scorers_str = goal_str[1].split('-')[1]
+            home_goal_scorers_str = goal_str[1].split('-')[0].strip()
+            away_goal_scorers_str = goal_str[1].split('-')[1].strip()
             home_goals = self.__process_goal_scorers(home_goal_scorers_str)
             away_goals = self.__process_goal_scorers(away_goal_scorers_str)
-            return {'home_goals': home_goals, 'away_goals': away_goals}
         else:
             if game_result['home_team']['goals'] > 0:
                 home_goals = self.__process_goal_scorers(goal_str[1])
-                return {'home_goals': home_goals}
             else:
                 away_goals = self.__process_goal_scorers(goal_str[1])
-                return {'away_goals': away_goals}
+        if len(home_goals) == game_result['home_team']['goals']:
+            ok_home_goals = True
+        if len(away_goals) == game_result['away_team']['goals']:
+            ok_away_goals = True
+        if ok_home_goals and ok_away_goals:
+            return {'home_goals': home_goals, 'away_goals': away_goals}
+        else:
+            if not ok_home_goals:
+                raise Exception('Couldnt collect all information of home goals')
+            if not ok_away_goals:
+                raise Exception('Couldnt collect all information of away goals')
 
     def __process_fixture_table(self, fixture_table, year):
         game_results = []
@@ -993,7 +1064,7 @@ class ParaguayanChampionshipScraper:
 
 if __name__ == '__main__':
     championship = read_championships_file('../data/campeonatos.csv')
-    championship_test = championship[44]
+    championship_test = championship[57]
     ws = ParaguayanChampionshipResultsScraper(
         url=championship_test['results']
     )
