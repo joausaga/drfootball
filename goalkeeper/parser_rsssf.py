@@ -81,7 +81,7 @@ def get_game_info(line, date_round, year, stadium=''):
 
 
 def is_a_game(line):
-    line = line.replace(' ','')
+    line = line.replace(' ', '')
     if line and line[0] != '[':
         return True
     else:
