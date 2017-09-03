@@ -2,7 +2,7 @@
 
 __author__ = 'jorgesaldivar'
 
-import requests, utils, unicodedata, pytz, re
+import requests, utils, pytz, re
 from bs4 import BeautifulSoup
 from datetime import date, datetime
 from data_collector import read_championships_file
@@ -44,10 +44,102 @@ class ParaguayanChampionshipResultsScraper:
         if ret_rq.status_code == 200:
             self.dom = BeautifulSoup(ret_rq.text, 'html.parser')
             championship_year = championship['year']
-            fixture_tables = self.__get_fixture_tables()
-            for fixture_table in fixture_tables:
-                fixture_results.append(self.__process_fixture_table(fixture_table, championship_year))
+            if int(championship_year) <= 2016:
+                fixture_tables = self.__get_fixture_tables()
+                for fixture_table in fixture_tables:
+                    fixture_results.append(self.__process_fixture_table(fixture_table, championship_year))
+            else:
+                fixture_results = self.__read_results_new_format(championship['num_teams'])
         return fixture_results
+
+    def __process_datetime_new_format(self, cell_content):
+        raw_dt = cell_content.split(',')
+        # process date
+        raw_date = raw_dt[0]
+        idx_de = raw_date.rfind(' de ')
+        day_month = raw_date[0:idx_de]
+        date_year = raw_date[idx_de+1:len(raw_date)].split('de')[1].strip()
+        game_date = self.__process_game_date(day_month, date_year)
+        # process date and timer
+        raw_time = raw_dt[1].strip()
+        game_time = datetime.strptime(raw_time, '%H:%M')
+        game_date = datetime.strptime(game_date, '%Y-%m-%d')
+        game_datetime = datetime(game_date.year, game_date.month, game_date.day,
+                                 game_time.hour, game_time.minute, game_time.second)
+        return game_datetime
+
+    def __process_goal_new_format(self, cell_content, num_goals):
+        count_element = 1
+        author_goal = type_goal = minute_goal = ''
+        goals = []
+        for child in cell_content.children:
+            if child.name == 'br':
+                goals.append(
+                    {'author': author_goal,
+                     'type': type_goal,
+                     'minute': minute_goal}
+                )
+                count_element = 1
+                type_goal = ''
+            else:
+                if count_element == 1:
+                    author_goal = child.get_text(strip=True).lower()
+                if count_element == 3:
+                    a_tag = child.a
+                    if a_tag:
+                        if a_tag['title'] == 'Penal':
+                            type_goal = 'penalty'
+                    else:
+                        minute_goal = self.__process_goal_minute(child.get_text(strip=True).lower())
+                if count_element == 4:
+                    if child.name == 'span':
+                        minute_goal = self.__process_goal_minute(child.get_text(strip=True).lower())
+                    else:
+                        raise Exception('Dont recognize html element')
+                count_element += 1
+
+        if len(goals) == num_goals:
+            return goals
+        else:
+            raise Exception('Couldnt collect all information about goals')
+
+    def __read_results_new_format(self, num_teams):
+        num_teams = int(num_teams)
+        tot_tables = ((num_teams/2) * ((num_teams-1)*2))
+        games = fx_games = []
+        for idx_table in range(0, tot_tables):
+            game = {}
+            id_table = 'collapsibleTable{0}'.format(idx_table)
+            table = self.dom.find_all(id=id_table)
+            rows = table.find_all('tr')
+            header = rows[0]
+            details = rows[1]
+            # collect info from header
+            cols_header = header.find_all('td')
+            game_dt = self.__process_datetime_new_format(cols_header[0])
+            game['datetime'] = self.py_timezone.localize(game_dt)
+            game['home_team'] = cols_header[1].get_text(strip=True).lower()
+            result = cols_header[2].span.b.get_text(strip=True).lower()
+            arr_result = result.split(':')
+            game['result'] = {'home_team': {'goals': int(arr_result[0])},
+                              'away_team': {'goals': int(arr_result[1])}}
+            game['awayteam'] = cols_header[3].get_text(strip=True).lower()
+            stadium = cols_header[4].span.get_text(strip=True).lower()
+            game['stadium'] = stadium.replace('estadio', '').strip()
+            # collect info from details
+            cols_details = details.find_all('td')
+            game['home_goals'] = self.__process_goal_new_format(cols_details[1], game['result']['home_team'])
+            game['away_goals'] = self.__process_goal_new_format(cols_details[3], game['result']['away_team'])
+            extra_info = cols_details[3].get_text(strip=True).lower()
+            arr_extra_info = extra_info.split(' ')
+            game['referee'] = '{0} {1}'.format(arr_extra_info[3].strip(), arr_extra_info[4].strip())
+            game['audience'] = arr_extra_info[3]
+            fx_games.append(game)
+            if len(fx_games) == (num_teams/2):
+                games.append(fx_games)
+                fx_games = []
+
+        return games
 
     def __get_fixture_tables(self):
         tables = self.dom.find_all('table')
@@ -1064,7 +1156,7 @@ class ParaguayanChampionshipScraper:
 
 if __name__ == '__main__':
     championship = read_championships_file('../data/campeonatos.csv')
-    championship_test = championship[57]
+    championship_test = championship[58]
     ws = ParaguayanChampionshipResultsScraper(
         url=championship_test['results']
     )
