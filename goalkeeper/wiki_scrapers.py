@@ -5,8 +5,6 @@ __author__ = 'jorgesaldivar'
 import requests, utils, pytz, re
 from bs4 import BeautifulSoup
 from datetime import date, datetime
-from data_collector import read_championships_file
-
 
 # Background color
 YELLOW_HEX = '#ffcc00;'
@@ -1155,7 +1153,7 @@ class ParaguayanChampionshipScraper:
 
 
 if __name__ == '__main__':
-    championship = read_championships_file('../data/campeonatos.csv')
+    championship = utils.csv_to_dict('../data/campeonatos.csv')
     championship_test = championship[58]
     ws = ParaguayanChampionshipResultsScraper(
         url=championship_test['results']

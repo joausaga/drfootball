@@ -1,6 +1,6 @@
 __author__ = 'jorgesaldivar'
 
-import unicodedata
+import unicodedata, csv
 
 
 def to_unicode(obj, encoding='utf-8'):
@@ -22,5 +22,14 @@ def translate_spanish_month_letter_to_number(month_letter):
         if month_name == month_letter:
             return month_number
 
+
 def normalize_text(text):
     return unicodedata.normalize('NFD', to_unicode(text)).encode('ascii', 'ignore')
+
+
+def csv_to_dict(csv_file):
+    with open(csv_file, 'r') as csv_file:
+        csv_reader = csv.DictReader(csv_file, delimiter=',')
+        csv_dict = list(csv_reader)
+
+    return csv_dict
