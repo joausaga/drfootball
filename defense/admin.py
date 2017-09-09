@@ -20,14 +20,14 @@ class TournamentAdmin(admin.ModelAdmin):
     def champion(self, obj):
         tournament_teams = obj.tournamentteam_set.all()
         for tournament_team in tournament_teams:
-            if tournament_team.final_status == 'champion':
+            if tournament_team.final_position == 1:
                 return tournament_team.team.name
         return ''
 
     def runnerup(self, obj):
         tournament_teams = obj.tournamentteam_set.all()
         for tournament_team in tournament_teams:
-            if tournament_team.final_status == 'runnerup':
+            if tournament_team.final_position == 2:
                 return tournament_team.team.name
         return ''
 
