@@ -3,7 +3,7 @@
 __author__ = 'jorgesaldivar'
 
 import requests, utils, pytz, re
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from datetime import date, datetime
 
 # Background color
@@ -68,9 +68,9 @@ class ParaguayanChampionshipResultsScraper:
 
     def __process_goal_new_format(self, cell_content, num_goals):
         count_element = 1
-        author_goal = type_goal = minute_goal = ''
+        author_goal, type_goal, minute_goal = '', '', ''
         goals = []
-        for child in cell_content.children:
+        for child in cell_content.contents:
             if child.name == 'br':
                 goals.append(
                     {'author': author_goal,
@@ -78,23 +78,36 @@ class ParaguayanChampionshipResultsScraper:
                      'minute': minute_goal}
                 )
                 count_element = 1
-                type_goal = ''
+                type_goal = minute_goal = ''
             else:
                 if count_element == 1:
-                    author_goal = child.get_text(strip=True).lower()
-                if count_element == 3:
-                    a_tag = child.a
-                    if a_tag:
-                        if a_tag['title'] == 'Penal':
-                            type_goal = 'penalty'
+                    if type(child) == NavigableString:
+                        if child != '\n':
+                            author_goal = child
                     else:
-                        minute_goal = self.__process_goal_minute(child.get_text(strip=True).lower())
-                if count_element == 4:
+                        author_goal = child.get_text(strip=True).lower()
+                else:
                     if child.name == 'span':
+                        if minute_goal:
+                            goals.append(
+                                {'author': author_goal,
+                                 'type': type_goal,
+                                 'minute': minute_goal}
+                            )
                         minute_goal = self.__process_goal_minute(child.get_text(strip=True).lower())
-                    else:
-                        raise Exception('Dont recognize html element')
+                        if child.a:
+                            if child.a['title'] == 'Autogol':
+                                type_goal = 'own goal'
+                            if child.a['title'] == 'Penal':
+                                type_goal = 'penalty'
                 count_element += 1
+
+        if author_goal:
+            goals.append(
+                {'author': author_goal,
+                 'type': type_goal,
+                 'minute': minute_goal}
+            )
 
         if len(goals) == num_goals:
             return goals
@@ -103,18 +116,18 @@ class ParaguayanChampionshipResultsScraper:
 
     def __read_results_new_format(self, num_teams):
         num_teams = int(num_teams)
-        tot_tables = ((num_teams/2) * ((num_teams-1)*2))
-        games = fx_games = []
-        for idx_table in range(0, tot_tables):
+        games, fx_games = [], []
+        tables = self.dom.find_all('table')
+        for table in tables:
+            if table.has_attr('class') and 'wikitable' in table['class']:
+                continue
             game = {}
-            id_table = 'collapsibleTable{0}'.format(idx_table)
-            table = self.dom.find_all(id=id_table)
             rows = table.find_all('tr')
             header = rows[0]
             details = rows[1]
             # collect info from header
             cols_header = header.find_all('td')
-            game_dt = self.__process_datetime_new_format(cols_header[0])
+            game_dt = self.__process_datetime_new_format(self.__clean_text_tag(cols_header[0]))
             game['datetime'] = self.py_timezone.localize(game_dt)
             game['home_team'] = cols_header[1].get_text(strip=True).lower()
             result = cols_header[2].span.b.get_text(strip=True).lower()
@@ -122,16 +135,18 @@ class ParaguayanChampionshipResultsScraper:
             game['result'] = {'home_team': {'goals': int(arr_result[0])},
                               'away_team': {'goals': int(arr_result[1])}}
             game['awayteam'] = cols_header[3].get_text(strip=True).lower()
+            if game['home_team'] == 'sportivo trinidense' and game['awayteam'] == 'independiente (cg)':
+                pass
             stadium = cols_header[4].span.get_text(strip=True).lower()
-            game['stadium'] = stadium.replace('estadio', '').strip()
+            game['stadium'] = stadium.replace('estadio', '').replace(',', '').strip()
             # collect info from details
             cols_details = details.find_all('td')
-            game['home_goals'] = self.__process_goal_new_format(cols_details[1], game['result']['home_team'])
-            game['away_goals'] = self.__process_goal_new_format(cols_details[3], game['result']['away_team'])
-            extra_info = cols_details[3].get_text(strip=True).lower()
-            arr_extra_info = extra_info.split(' ')
-            game['referee'] = '{0} {1}'.format(arr_extra_info[3].strip(), arr_extra_info[4].strip())
-            game['audience'] = arr_extra_info[3]
+            game['home_goals'] = self.__process_goal_new_format(cols_details[1], game['result']['home_team']['goals'])
+            game['away_goals'] = self.__process_goal_new_format(cols_details[3], game['result']['away_team']['goals'])
+            extra_info = cols_details[4].get_text(strip=True).lower()
+            arr_extra_info = extra_info.split(':')
+            game['referee'] = utils.to_unicode(arr_extra_info[2].strip())
+            game['audience'] = self.num_pattern.sub('',arr_extra_info[1])
             fx_games.append(game)
             if len(fx_games) == (num_teams/2):
                 games.append(fx_games)
@@ -208,6 +223,20 @@ class ParaguayanChampionshipResultsScraper:
                 else:
                     return 'arbitro'
 
+    def __clean_text_tag(self, tag_txt):
+        if tag_txt.sup:
+            tag_txt.sup.clear()
+        content = utils.to_unicode(tag_txt.get_text().lower())
+        content = content.replace(u'\xa0', u' ')  # Remove unicode representation of blank space (\xa0)
+        if u'\u200b' in content:
+            idx_square_bracket = content.find('[')
+            content = content[0:idx_square_bracket]
+        if u'\u200b' in content:
+            content = content.replace(u'\u200b', u'')
+        content = content.replace('\n', ' ')
+
+        return content
+
     def __table_to_matrix(self, table):
         table_matrix = []
         # Save table header
@@ -253,16 +282,7 @@ class ParaguayanChampionshipResultsScraper:
                     if i in span_content['affected_rows']:
                         row_body[span_content['col']] = span_content['content']
             for j in range(0, num_col_row):
-                if columns[j].sup:
-                    columns[j].sup.clear()
-                content = utils.to_unicode(columns[j].get_text().lower())
-                content = content.replace(u'\xa0', u' ')  # Remove unicode representation of blank space (\xa0)
-                if u'\u200b' in content:
-                    idx_square_bracket = content.find('[')
-                    content = content[0:idx_square_bracket]
-                if u'\u200b' in content:
-                    content = content.replace(u'\u200b', u'')
-                content = content.replace('\n', ' ')
+                content = self.__clean_text_tag(columns[j])
                 if columns[j].has_attr('rowspan'):
                     type_content = self.__identify_type_content(content, pos_std, pos_yc)
                     if type_content == 'tarjetas amarillas':
@@ -569,7 +589,7 @@ class ParaguayanChampionshipScraper:
                 teams = self.__update_teams_info(teams, team_audiences)
             return {
                 'championship': champ,
-                'teams' : teams
+                'teams': teams
             }
         else:
             raise Exception('Request get the code ' + ret.status_code)
@@ -1152,11 +1172,11 @@ class ParaguayanChampionshipScraper:
             raise Exception('Could not find table of referees')
 
 
-if __name__ == '__main__':
-    championship = utils.csv_to_dict('../data/campeonatos.csv')
-    championship_test = championship[58]
-    ws = ParaguayanChampionshipResultsScraper(
-        url=championship_test['results']
-    )
-    ret = ws.collect_championship_results(championship_test)
-    pass
+# if __name__ == '__main__':
+#     championship = utils.csv_to_dict('../data/campeonatos.csv')
+#     championship_test = championship[58]
+#     ws = ParaguayanChampionshipResultsScraper(
+#         url=championship_test['results']
+#     )
+#     ret = ws.collect_championship_results(championship_test)
+#     pass
