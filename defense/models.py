@@ -44,6 +44,12 @@ LEAGUE = (
     ('fourth', 'Fourth'),
 )
 
+SYSTEM = (
+    ('todos', 'Todos contra todos'),
+    ('liguilla', 'Liguilla'),
+    ('final', 'Final'),
+)
+
 REF_ROLES = (
     ('main', 'Main'),
     ('lineman', 'Lineman'),
@@ -235,14 +241,26 @@ class Tournament(models.Model):
     country = models.ForeignKey(Country, on_delete=models.CASCADE)
     league = models.CharField(max_length=50, null=True, blank=True,
                               choices=LEAGUE)
+    year = models.IntegerField()
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     edition = models.IntegerField(null=True, blank=True)
     points_for_victory = models.IntegerField(default=3)
+    rounds = models.IntegerField(null=True, blank=True)
+    number_of_teams = models.IntegerField()
+    system = models.CharField(max_length=50, null=True, blank=True,
+                              choices=SYSTEM)
+    season_champion = models.BooleanField()
     teams = models.ManyToManyField(Team, through='TournamentTeam')
     scorers = models.ManyToManyField(Player, through='TournamentPlayer')
     champion_of_season = models.BooleanField(default=True)
     source = models.ManyToManyField(Source)
+    result_source = models.ManyToManyField(Source, related_name='results_source')
+    # for internal usage only
+    record_problem = models.CharField(max_length=50, null=True, blank=True)
+    start_string = models.CharField(max_length=50, null=True, blank=True)
+    end_string = models.CharField(max_length=50, null=True, blank=True)
+    additional_info = models.CharField(max_length=50, null=True, blank=True)
 
     def __unicode__(self):
         return "%s, %s" % (self.name, self.country)
