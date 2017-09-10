@@ -511,7 +511,7 @@ class ParaguayanChampionshipResultsScraper:
         return game_results
 
 
-class ParaguayanChampionshipScraper:
+class ParaguayanTournamentScraper:
     url = ''
     dom = None
     prefix_url = 'https://es.wikipedia.org'
@@ -537,12 +537,12 @@ class ParaguayanChampionshipScraper:
         additional_info = championship['additional_info']
         return [option.strip() for option in additional_info.split(';')]
 
-    def collect_championship_info(self, championship):
+    def collect_tournament_info(self, championship):
         ret = requests.get(self.url)
         if ret.status_code == 200:
             self.dom = BeautifulSoup(ret.text, 'html.parser')
             information_to_collect = self.__get_info_to_collect(championship)
-            championship_year = championship['year']
+            championship_year = str(championship['year'])
             championship_name = championship['name']
             teams = {}
             champ = {}
