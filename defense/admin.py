@@ -9,10 +9,13 @@ from django.contrib import admin
 from goalkeeper import parser_rsssf
 from goalkeeper.wiki_scrapers import ParaguayanChampionshipResultsScraper, \
                                      ParaguayanTournamentScraper
-import itertools, re, utils
+import itertools
+import re
+import utils
 
 
 num_pattern = re.compile('[^0-9]')
+DEF_COUNTRY = 'paraguay'
 
 
 def disambiguate_objs_by_name(objs, ref_name):
@@ -25,24 +28,34 @@ def disambiguate_objs_by_name(objs, ref_name):
     return objs[idx_max_sim]
 
 
-def create_new_team(name, stadium, wikipage=None):
-    new_team = Team(name=name, city=stadium.city, stadium=stadium,
-                    wikipage=wikipage)
-    new_team.save()
-    return new_team
+def create_new_team(team_dict, stadium_obj):
+    team_name = utils.format_text_to_save_db(team_dict['name'])
+    if 'wikipage' in team_dict.keys():
+        return Team.objects.create(name=team_name, city=stadium_obj.city,
+                                       wikipage=team_dict['wikipage'])
+    else:
+        return Team.objects.create(name=team_name, city=stadium_obj.city)
 
 
-def create_new_stadium(name, city, capacity, wikipage=None):
-    new_stadium = Stadium(name=name, city=city, capacity=capacity,
-                          wikipage=wikipage)
-    new_stadium.save()
-    return new_stadium
+def create_new_stadium(stadium_dict, city):
+    stadium_name = utils.format_text_to_save_db(stadium_dict['name'])
+    if 'capacity' in stadium_dict.keys():
+        capacity = int(num_pattern.sub('', stadium_dict['capacity']))
+    else:
+        capacity = -1
+    if 'wikipage' in stadium_dict.keys():
+        return Stadium.objects.create(name=stadium_name, city=city, capacity=capacity,
+                                      wikipage=stadium_dict['wikipage'])
+    else:
+        return Stadium.objects.create(name=stadium_name, city=city, capacity=capacity)
 
 
-def create_new_city(name, country, wikipage=None):
-    new_city = City(name=name, country=country, wikipage=wikipage)
-    new_city.save()
-    return new_city
+def create_new_city(city_dict, country):
+    city_name = utils.format_text_to_save_db(city_dict['name'])
+    if 'wikipage' in city_dict.keys():
+        return City.objects.create(name=city_name, country=country, wikipage=city_dict['wikipage'])
+    else:
+        return City.objects.create(name=city_name, country=country)
 
 
 class SourceAdmin(admin.ModelAdmin):
@@ -67,70 +80,77 @@ class TournamentAdmin(admin.ModelAdmin):
                 return tournament_team.team.name
         return ''
 
-    def __get_or_create_team(self, team):
-        team_name = utils.normalize_text(team['equipo'])
+    def __get_or_create_city(self, city_dict):
+        city_name = utils.normalize_text(city_dict['name'])
+        city_objs = City.objects.filter(name__icontains=city_name)
+        if len(city_objs) == 0:
+            # the city doesn't exist, the default country for
+            # all cities will be paraguay
+            country = Country.objects.get(name__iexact=DEF_COUNTRY)
+            city = create_new_city(city_dict, country)
+        elif len(city_objs) == 1:
+            city = city_objs[0]
+        elif len(city_objs) > 1:
+            city = disambiguate_objs_by_name(city_objs, city_name)
+        else:
+            raise Exception('Error!, Dont understand the number of cities')
+        return city
+
+    # TODO: if the stadium exists already see what can be updated (e.g., capacity)
+    def __get_or_create_stadium(self, stadium_dict, city_dict):
+        stadium_name = utils.normalize_text(stadium_dict['name'])
+        stadium_objs = Stadium.objects.filter(name__icontains=stadium_name)
+        city = self.__get_or_create_city(city_dict)
+        if len(stadium_objs) == 0:
+            # the stadium doesn't exist yet
+            stadium = create_new_stadium(stadium_dict, city)
+        elif len(stadium_objs) == 1:
+            stadium = stadium_objs[0]
+        elif len(stadium_objs) > 1:
+            stadium = disambiguate_objs_by_name(stadium_objs, stadium_name)
+        else:
+            raise Exception('Error!, Dont understand the number of stadiums')
+        return stadium
+
+    # TODO: if the team exists already see what can be updated
+    def __get_or_create_team(self, team, source):
+        team_name = utils.normalize_text(team['name'])
         team_objs = Team.objects.filter(name__icontains=team_name)
+        stadium = self.__get_or_create_stadium(team['stadium'], team['city'])
         if len(team_objs) == 1:
-            return team_objs[0]
+            team = team_objs[0]
         elif len(team_objs) > 1:
-            return disambiguate_objs_by_name(team_objs, team_name)
+            team = disambiguate_objs_by_name(team_objs, team_name)
         elif len(team_objs) == 0:
             # the team doesn't exist yet
-            stadium_name = utils.normalize_text(team['estadio'])
-            stadium_objs = Stadium.objects.filter(name__icontains=stadium_name)
-            if len(stadium_objs) == 0:
-                # the stadium doesn't exist yet
-                city_name = utils.normalize_text(team['ciudad'])
-                capacity = int(num_pattern.sub('', team['capacidad'])) if 'capacidad' in team.keys() else -1
-                city_objs = City.objects.filter(name__icontains=city_name)
-                if len(city_objs) == 0:
-                    # the city doesn't exist, the default country for
-                    # all cities will be paraguay
-                    country = Country(name__icontains='paraguay')
-                    if 'wikipage' in team['city'].keys():
-                        city = create_new_city(city_name, country, team['city']['wikipage'])
-                    else:
-                        city = create_new_city(city_name, country)
-                elif len(city_objs) == 1:
-                    city = city_objs[0]
-                elif len(city_objs) > 1:
-                    city = disambiguate_objs_by_name(city_objs, city_name)
-                else:
-                    raise Exception('Error!, Dont understand the number of cities')
-                if 'wikipage' in team['stadium'].keys():
-                    stadium = create_new_stadium(stadium_name, city, capacity, team['stadium']['wikipage'])
-                else:
-                    stadium = create_new_stadium(stadium_name, city, capacity)
-            elif len(stadium_objs) == 1:
-                stadium = stadium_objs[0]
-            elif len(stadium_objs) > 1:
-                stadium = disambiguate_objs_by_name(stadium_objs, stadium_name)
-            else:
-                raise Exception('Error!, Dont understand the number of stadiums')
+            team = create_new_team(team, stadium)
         else:
             raise Exception('Error!, Dont understand the number of teams')
-        if 'wikipage' in team.keys():
-            new_team = create_new_team(team_name, stadium, team['wikipage'])
-        else:
-            new_team = create_new_team(team_name, stadium)
-        return new_team
+        # associate the team with its stadium in case the association
+        # doesn't exists
+        if not team.stadium.all():
+            StadiumTeam.objects.create(stadium=stadium, team=team, source=source)
+        return team
 
     def collect_extra_info(self, request, queryset):
         for obj in queryset:
-            py_ch_scrapper = ParaguayanTournamentScraper(obj.source.all()[0].url)
-            tournament = {
+            tournament_obj = obj
+            source_obj = tournament_obj.source.all()[0]
+            py_ch_scrapper = ParaguayanTournamentScraper(source_obj.url)
+            tournament_dict = {
                 'name': obj.name,
                 'year': obj.year,
                 'additional_info': obj.additional_info
             }
-            print(tournament)
-            tournament_info = py_ch_scrapper.collect_tournament_info(tournament)
-            print(tournament_info)
-            if 'teams_info' in tournament_info.keys():
+            tournament_info = py_ch_scrapper.collect_tournament_info(tournament_dict)
+            information_collected = [option.strip() for option in obj.additional_info.split(';')]
+            if 'teams info' in information_collected:
                 for team in tournament_info['teams']:
                     # add teams to tournament
-                    team = self.__get_or_create_team(team)
-                    obj.teams.add(team)
+                    team_obj = self.__get_or_create_team(team, source_obj)
+                    TournamentTeam.objects.create(tournament=tournament_obj,
+                                                  team=team_obj,
+                                                  source=source_obj)
     collect_extra_info.short_description = "Collect Extra Information"
 
     def collect_results(self, request, queryset):
@@ -139,7 +159,7 @@ class TournamentAdmin(admin.ModelAdmin):
 
 
 class TournamentTeamAdmin(admin.ModelAdmin):
-    list_display = ('team', 'tournament', 'final_position')
+    list_display = ('tournament', 'team', 'final_position')
 
 
 class TeamAdmin(admin.ModelAdmin):
@@ -199,18 +219,35 @@ class GameTeamAdmin(admin.ModelAdmin):
     list_display = ('game', 'team', 'goals')
 
 
+class StadiumAdmin(admin.ModelAdmin):
+    list_display = ('name', 'city', 'team_owner', 'display_capacity')
+    ordering = ('name',)
+
+    def team_owner(self, obj):
+        team_owner = obj.team_set.all()[0]
+        return team_owner.name
+    team_owner.short_description = 'Team Owner'
+
+    def display_capacity(self, obj):
+        if obj.capacity == -1:
+            return 'Unknown'
+        else:
+            return utils.int_seperation_char(obj.capacity, sep_char='.')
+    display_capacity.short_description = 'Capacity'
+
+
 admin.site.register(Source, SourceAdmin)
 admin.site.register(Country)
 admin.site.register(Region)
 admin.site.register(City)
-admin.site.register(Stadium)
+admin.site.register(Stadium, StadiumAdmin)
 admin.site.register(Player)
 admin.site.register(Coach)
 admin.site.register(Referee)
 admin.site.register(Team, TeamAdmin)
 admin.site.register(PlayerTeam)
 admin.site.register(CoachTeam)
-admin.site.register(StadiumTeam)
+#admin.site.register(StadiumTeam)
 admin.site.register(Tournament, TournamentAdmin)
 admin.site.register(TournamentTeam, TournamentTeamAdmin)
 admin.site.register(TournamentPlayer)
