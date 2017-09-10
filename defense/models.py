@@ -239,7 +239,7 @@ class StadiumTeam(models.Model):
     stadium = models.ForeignKey(Stadium, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
     from_date = models.DateField(null=True, blank=True)
-    source = models.ManyToManyField(Source)
+    source = models.ForeignKey(Source, default='')
 
 
 class Tournament(models.Model):
@@ -293,7 +293,7 @@ class TournamentTeam(models.Model):
     goals_conceded = models.IntegerField(default=0)
     cards = models.IntegerField(default=0)
     final_position = models.IntegerField(default=0)
-    source = models.ManyToManyField(Source)
+    source = models.ForeignKey(Source, default='')
 
 
 class TournamentStatus(models.Model):
