@@ -112,10 +112,15 @@ class Region(models.Model):
 
 class City(models.Model):
     name = models.CharField(max_length=100)
-    region = models.ForeignKey(Region)
+    region = models.ForeignKey(Region, blank=True, null=True)
+    country = models.ForeignKey(Country, default=1)  # 1 == Paraguay
+    wikipage = models.URLField(blank=True, null=True)
 
     def __unicode__(self):
-        return "%s, %s" % (self.name, self.region.country.name)
+        if self.region:
+            return "%s, %s" % (self.name, self.region.country.name)
+        else:
+            return "%s, %s" % (self.name, self.country.name)
 
 
 class Stadium(models.Model):
@@ -127,6 +132,7 @@ class Stadium(models.Model):
                                   choices=STADIUM_OWNER_TYPES)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    wikipage = models.URLField(blank=True, null=True)
 
     def __unicode__(self):
         return "%s, %s" % (self.name, self.city)
@@ -191,7 +197,7 @@ class Team(models.Model):
     losses = models.IntegerField(default=0)
     goals = models.IntegerField(default=0)
     goals_conceded = models.IntegerField(default=0)
-    source = models.URLField(blank=True, null=True)
+    wikipage = models.URLField(blank=True, null=True)
 
     def __unicode__(self):
         return "%s, %s" % (self.name, self.city)
@@ -241,22 +247,22 @@ class Tournament(models.Model):
     country = models.ForeignKey(Country, on_delete=models.CASCADE)
     league = models.CharField(max_length=50, null=True, blank=True,
                               choices=LEAGUE)
-    year = models.IntegerField()
+    year = models.IntegerField(null=True, blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     edition = models.IntegerField(null=True, blank=True)
     points_for_victory = models.IntegerField(default=3)
     rounds = models.IntegerField(null=True, blank=True)
-    number_of_teams = models.IntegerField()
+    number_of_teams = models.IntegerField(default=12)
     system = models.CharField(max_length=50, null=True, blank=True,
                               choices=SYSTEM)
-    season_champion = models.BooleanField()
     teams = models.ManyToManyField(Team, through='TournamentTeam')
     scorers = models.ManyToManyField(Player, through='TournamentPlayer')
     champion_of_season = models.BooleanField(default=True)
     source = models.ManyToManyField(Source)
     result_source = models.ManyToManyField(Source, related_name='results_source')
     # for internal usage only
+    season_champion = models.BooleanField(default=False)
     record_problem = models.CharField(max_length=50, null=True, blank=True)
     start_string = models.CharField(max_length=50, null=True, blank=True)
     end_string = models.CharField(max_length=50, null=True, blank=True)
