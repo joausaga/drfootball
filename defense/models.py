@@ -184,7 +184,7 @@ class Team(models.Model):
     city = models.ForeignKey(City)
     stadium = models.ManyToManyField(Stadium, through='StadiumTeam')
     badge = models.ImageField(null=True, blank=True)
-    birth_date = models.DateField(null=True, blank=True)
+    foundation = models.DateField(null=True, blank=True)
     local_championships = models.IntegerField(default=0)
     local_runnerups = models.IntegerField(default=0)
     international_championships = models.IntegerField(default=0)
