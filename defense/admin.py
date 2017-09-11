@@ -50,12 +50,27 @@ def create_new_stadium(stadium_dict, city):
         return Stadium.objects.create(name=stadium_name, city=city, capacity=capacity)
 
 
-def create_new_city(city_dict, country):
+def create_new_city(city_dict, region, country):
     city_name = utils.format_text_to_save_db(city_dict['name'])
     if 'wikipage' in city_dict.keys():
-        return City.objects.create(name=city_name, country=country, wikipage=city_dict['wikipage'])
+        if region:
+            return City.objects.create(name=city_name, country=country, region=region,
+                                       wikipage=city_dict['wikipage'])
+        else:
+            return City.objects.create(name=city_name, country=country, wikipage=city_dict['wikipage'])
     else:
-        return City.objects.create(name=city_name, country=country)
+        if region:
+            return City.objects.create(name=city_name, country=country, region=region)
+        else:
+            return City.objects.create(name=city_name, country=country)
+
+
+def create_new_region(region_dict, country):
+    region_name = utils.format_text_to_save_db(region_dict['name'])
+    if 'wikipage' in region_dict.keys():
+        return Region.objects.create(name=region_name, country=country, wikipage=region_dict['wikipage'])
+    else:
+        return City.objects.create(name=region_name, country=country)
 
 
 class SourceAdmin(admin.ModelAdmin):
@@ -80,6 +95,30 @@ class TournamentAdmin(admin.ModelAdmin):
                 return tournament_team.team.name
         return ''
 
+    def __get_or_create_region(self, region_dict):
+        region_name = utils.normalize_text(region_dict['name'])
+        region_objs = Region.objects.filter(name__icontains=region_name)
+        if len(region_objs) == 0:
+            # the region doesn't exist, the default country for
+            # all regions will be paraguay
+            country = Country.objects.get(name__iexact=DEF_COUNTRY)
+            region = create_new_region(region_dict, country)
+        elif len(region_objs) == 1:
+            region = region_objs[0]
+        elif len(region_objs) > 1:
+            region = disambiguate_objs_by_name(region_objs, region_name)
+        else:
+            raise Exception('Error!, Dont understand the number of cities')
+        return region
+
+    def __update_city(self, city_obj, city_dict):
+        if 'wikipage' in city_dict.keys():
+            city_obj.wikipage = city_dict['wikipage']
+        if 'region' in city_dict.keys():
+            region = self.__get_or_create_region(city_dict['region'])
+            city_obj.add(region)
+        city_obj.save()
+
     def __get_or_create_city(self, city_dict):
         city_name = utils.normalize_text(city_dict['name'])
         city_objs = City.objects.filter(name__icontains=city_name)
@@ -87,16 +126,27 @@ class TournamentAdmin(admin.ModelAdmin):
             # the city doesn't exist, the default country for
             # all cities will be paraguay
             country = Country.objects.get(name__iexact=DEF_COUNTRY)
-            city = create_new_city(city_dict, country)
+            if 'region' in city_dict:
+                region = self.__get_or_create_region(city_dict['region'])
+            else:
+                region = None
+            city = create_new_city(city_dict, region, country)
         elif len(city_objs) == 1:
             city = city_objs[0]
         elif len(city_objs) > 1:
             city = disambiguate_objs_by_name(city_objs, city_name)
         else:
             raise Exception('Error!, Dont understand the number of cities')
+        self.__update_city(city, city_dict)
         return city
 
-    # TODO: if the stadium exists already see what can be updated (e.g., capacity)
+    def __update_stadium(self, stadium_obj, stadium_dict):
+        if 'capacity' in stadium_dict.keys():
+            stadium_obj.capacity = stadium_dict['capacity']
+        if 'wikipage' in stadium_dict.keys():
+            stadium_obj.wikipage = stadium_dict['wikipage']
+        stadium_obj.save()
+
     def __get_or_create_stadium(self, stadium_dict, city_dict):
         stadium_name = utils.normalize_text(stadium_dict['name'])
         stadium_objs = Stadium.objects.filter(name__icontains=stadium_name)
@@ -110,27 +160,35 @@ class TournamentAdmin(admin.ModelAdmin):
             stadium = disambiguate_objs_by_name(stadium_objs, stadium_name)
         else:
             raise Exception('Error!, Dont understand the number of stadiums')
+        self.__update_stadium(stadium, stadium_dict)
         return stadium
 
-    # TODO: if the team exists already see what can be updated
+    def __update_team(self, team_obj, team_dict):
+        if 'foundation' in team_dict.keys():
+            team_obj.foundation = team_dict['foundation']
+        if 'wikipage' in team_dict.keys():
+            team_obj.wikipage = team_dict['wikipage']
+        team_obj.save()
+
     def __get_or_create_team(self, team, source):
         team_name = utils.normalize_text(team['name'])
         team_objs = Team.objects.filter(name__icontains=team_name)
         stadium = self.__get_or_create_stadium(team['stadium'], team['city'])
         if len(team_objs) == 1:
-            team = team_objs[0]
+            team_obj = team_objs[0]
         elif len(team_objs) > 1:
-            team = disambiguate_objs_by_name(team_objs, team_name)
+            team_obj = disambiguate_objs_by_name(team_objs, team_name)
         elif len(team_objs) == 0:
             # the team doesn't exist yet
-            team = create_new_team(team, stadium)
+            team_obj = create_new_team(team, stadium)
         else:
             raise Exception('Error!, Dont understand the number of teams')
         # associate the team with its stadium in case the association
         # doesn't exists
-        if not team.stadium.all():
-            StadiumTeam.objects.create(stadium=stadium, team=team, source=source)
-        return team
+        if not team_obj.stadium.all():
+            StadiumTeam.objects.create(stadium=stadium, team=team_obj, source=source)
+        self.__update_team(team_obj, team)
+        return team_obj
 
     def collect_extra_info(self, request, queryset):
         for obj in queryset:
@@ -163,9 +221,9 @@ class TournamentTeamAdmin(admin.ModelAdmin):
 
 
 class TeamAdmin(admin.ModelAdmin):
-    list_display = ('name', 'city', 'birth_date', 'local_championships',
+    list_display = ('name', 'city', 'foundation', 'local_championships',
                     'international_championships')
-    ordering = ('name', 'birth_date', 'local_championships', 'international_championships')
+    ordering = ('name', 'foundation', 'local_championships', 'international_championships')
 
 
 class GameAdmin(admin.ModelAdmin):
