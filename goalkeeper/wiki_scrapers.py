@@ -945,6 +945,7 @@ class ParaguayanTournamentScraper:
                 if 'dif' in header[j]:
                     team['goals_difference'] = table_columns[j].get_text(strip=True)
             team['international_status'] = self.__process_team_season_final_status(table_rows[i], year)
+            team['position'] = i
             team_season.append(team)
         return team_season
 
@@ -955,11 +956,11 @@ class ParaguayanTournamentScraper:
     def __get_table_season_statuses(self, year):
         if year in ['1998', '2000', '2001', '2002', '2003']:
             headers = ['pos', 'equipo', 'pts', 'pj', 'g', 'e', 'p', 'gf', 'gc', 'dif']
-        elif year in ['1999', '2006', '2009', '2011', '2012', '2013', '2014']:
+        elif year in ['2006', '2009', '2011', '2012', '2013', '2014']:
             headers = ['pos.', 'equipos', 'pts.', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.']
         elif year in ['2004', '2005']:
             headers = ['equipo', 'pts', 'pj', 'g', 'e', 'p', 'gf', 'gc', 'dif']
-        elif year == '2010':
+        elif year in ['1999', '2010']:
             headers = ['pos.', 'equipos', 'pj', 'pg', 'pe', 'pp', 'gf', 'gc', 'dif.', 'pts.']
         # year in ['2007', '2008', '2015', '2016']
         else:
@@ -972,6 +973,7 @@ class ParaguayanTournamentScraper:
             # get first team
             first_team = table_rows[1]   # first row is the header
             pj_idx = headers.index('pj')
+            print(pj_idx)
             first_team_pj = int(first_team.find_all('td')[pj_idx].get_text(strip=True))
             # pj should be equal to the total games in the season
             if int(year) == 1998:
@@ -995,7 +997,7 @@ class ParaguayanTournamentScraper:
         if table_season:
             return table_season
         else:
-            raise Exception('Could not find table of team season buyers')
+            raise Exception('Could not find table season')
 
     def __process_country_flag_cell(self, table_cell):
         country_flag = table_cell.span.img
