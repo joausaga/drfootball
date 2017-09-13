@@ -258,7 +258,6 @@ class Tournament(models.Model):
                               choices=SYSTEM)
     teams = models.ManyToManyField(Team, through='TournamentTeam')
     scorers = models.ManyToManyField(Player, through='TournamentPlayer')
-    champion_of_season = models.BooleanField(default=True)
     source = models.ManyToManyField(Source)
     result_source = models.ManyToManyField(Source, related_name='results_source')
     # for internal usage only
@@ -299,11 +298,14 @@ class TournamentTeam(models.Model):
 class TournamentStatus(models.Model):
     name = models.CharField(max_length=100)
 
+    def __unicode__(self):
+        return "%s" % (self.name)
+
 
 class SeasonTeamFinalStatus(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
     season = models.IntegerField(default=0)
-    status = models.ForeignKey(TournamentStatus, on_delete=models.CASCADE)
+    status = models.ManyToManyField(TournamentStatus, blank=True)
     position = models.IntegerField(default=0)
     points = models.IntegerField(default=0)
     games = models.IntegerField(default=0)
@@ -312,6 +314,7 @@ class SeasonTeamFinalStatus(models.Model):
     losses = models.IntegerField(default=0)
     goals = models.IntegerField(default=0)
     goals_conceded = models.IntegerField(default=0)
+    goals_difference = models.IntegerField(default=0)
 
 
 class Game(models.Model):
