@@ -46,11 +46,12 @@ def search_most_similar_strings(model, name):
     similar_ratios = []
     for obj in model_objs:
         similar_ratios.append(SequenceMatcher(None, name, obj.name).ratio())
-    max_ratios = max(similar_ratios)
-    size_vec_sim = len(similar_ratios)
-    for i in range(0, size_vec_sim):
-        if similar_ratios[i] == max_ratios:
-            objs_to_return.append(model_objs[i])
+    if similar_ratios:
+        max_ratios = max(similar_ratios)
+        size_vec_sim = len(similar_ratios)
+        for i in range(0, size_vec_sim):
+            if similar_ratios[i] == max_ratios:
+                objs_to_return.append(model_objs[i])
     return objs_to_return
 
 def search_obj_by_name(model, name):
@@ -295,7 +296,7 @@ class TournamentAdmin(admin.ModelAdmin):
             tournament_team_obj.wins += 1
         elif game_team_obj.goals == int(rival_dict['score']):
             team_result = 'drew'
-            tournament_team_obj.draws +=1
+            tournament_team_obj.draws += 1
         else:
             team_result = 'lost'
             tournament_team_obj.losses += 1
@@ -465,10 +466,10 @@ class TournamentAdmin(admin.ModelAdmin):
                 tournament_player_attrs = {
                     'tournament': tournament_obj,
                     'player': player_obj,
-                    'goals': len(goals),
-                    'source': source_obj
+                    'goals': len(goals)
                 }
-                TournamentPlayer.objects.create(**tournament_player_attrs)
+                tp = TournamentPlayer.objects.create(**tournament_player_attrs)
+                tp.source.add(source_obj)
         self.message_user(request, "The action was completed successfully!")
     collect_results.short_description = "Collect Tournament Results"
 
