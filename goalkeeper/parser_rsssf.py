@@ -256,7 +256,7 @@ def get_goal_info(line, game):
 
 
 def read_championship_results(championship):
-    results_fname = '../data/' + championship['results_local_fname']
+    results_fname = 'data/' + championship['results_local_file_name']
     in_round = False
     championship_games = []
     num_round = -1
@@ -346,13 +346,14 @@ def read_championship_results(championship):
 def get_data(championship):
     return read_championship_results(championship)
 
-# if __name__ == '__main__':
-#     dict_championships = []
-#     meta_championships = read_championships_file('data/campeonatos.csv')
-#     for meta_championship in meta_championships:
-#         if int(meta_championship['year']) <= 2007:
-#             print('Championship %s', meta_championship['name'])
-#             dict_championships.append(read_championship_results(meta_championship))
-#         else:
-#             print('here')
-#     print ('Finished!')
+if __name__ == '__main__':
+    dict_championships = []
+    meta_championships = utils.csv_to_dict('data/campeonatos.csv')
+    print(read_championship_results(meta_championships[7]))
+    # for meta_championship in meta_championships:
+    #     if int(meta_championship['year']) <= 2007:
+    #         print('Championship %s', meta_championship['name'])
+    #         dict_championships.append(read_championship_results(meta_championship))
+    #     else:
+    #         print('here')
+    # print ('Finished!')

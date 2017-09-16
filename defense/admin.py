@@ -1,18 +1,29 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+# python libraries
+from collections import defaultdict
+from datetime import datetime
+from difflib import SequenceMatcher
+import itertools
+import re
+import pytz
+
+# django modules
+from django.contrib import admin
+from django.core.exceptions import ObjectDoesNotExist
+
+# project imports
 from models import Source, Country, Region, City, Stadium, Player, Coach, \
                    Referee, Team, PlayerTeam, CoachTeam, StadiumTeam, \
                    Tournament, TournamentTeam, TournamentPlayer, Game, \
                    GameTeam, GamePlayer, GameReferee, Goal, Card, SeasonTeamFinalStatus, \
                    TournamentStatus
-from django.contrib import admin
+
+import utils
 from goalkeeper import parser_rsssf
 from goalkeeper.wiki_scrapers import ParaguayanChampionshipResultsScraper, \
                                      ParaguayanTournamentScraper
-import itertools
-import re
-import utils
 
 
 num_pattern = re.compile('[^0-9]')
@@ -29,49 +40,83 @@ def disambiguate_objs_by_name(objs, ref_name):
     return objs[idx_max_sim]
 
 
-def create_new_team(team_dict, stadium_obj):
-    team_name = utils.format_text_to_save_db(team_dict['name'])
-    if 'wikipage' in team_dict.keys():
-        return Team.objects.create(name=team_name, city=stadium_obj.city,
-                                       wikipage=team_dict['wikipage'])
+def search_most_similar_strings(model, name):
+    objs_to_return = []
+    model_objs = model.objects.all()
+    similar_ratios = []
+    for obj in model_objs:
+        similar_ratios.append(SequenceMatcher(None, name, obj.name).ratio())
+    max_ratios = max(similar_ratios)
+    size_vec_sim = len(similar_ratios)
+    for i in range(0, size_vec_sim):
+        if similar_ratios[i] == max_ratios:
+            objs_to_return.append(model_objs[i])
+    return objs_to_return
+
+def search_obj_by_name(model, name):
+    nor_name = utils.normalize_text(name).strip()
+    objs_to_return = model.objects.filter(name__icontains=nor_name)
+    if len(objs_to_return) == 1:
+        return objs_to_return
     else:
-        return Team.objects.create(name=team_name, city=stadium_obj.city)
+        if len(objs_to_return) == 0:
+            objs_to_return = search_most_similar_strings(model, nor_name)
+        if len(objs_to_return) > 1:
+            objs_to_return = [disambiguate_objs_by_name(objs_to_return, nor_name)]
+    return objs_to_return
+
+
+def create_new_person(person_dict):
+    person_attrs = {'name': utils.format_text_to_save_db(person_dict['name'])}
+    if 'wikipage' in person_dict.keys() and person_dict['wikipage']:
+        person_attrs['wikipage'] = person_dict['wikipage']
+    if 'country' in person_dict.keys():
+        country = Country.objects.get_or_create(name__iexact=person_dict['country'])
+        person_attrs['nationality'] = country
+    return Player.objects.create(**person_attrs)
+
+
+def update_person(person_obj, person_dict):
+    if 'country' in person_dict.keys():
+        person_obj.nationality= person_dict['country']
+    if 'wikipage' in person_dict.keys():
+        person_obj.wikipage = person_dict['wikipage']
+    person_obj.save()
+
+
+def create_new_team(team_dict, stadium_obj):
+    team_attrs = {'name': utils.format_text_to_save_db(team_dict['name']),
+                  'city': stadium_obj.city}
+    if 'wikipage' in team_dict.keys():
+        team_attrs['wikipage'] = team_dict['wikipage']
+    return Team.objects.create(**team_attrs)
 
 
 def create_new_stadium(stadium_dict, city):
-    stadium_name = utils.format_text_to_save_db(stadium_dict['name'])
+    stadium_attrs = {'name': utils.format_text_to_save_db(stadium_dict['name'])}
     if 'capacity' in stadium_dict.keys():
-        capacity = int(num_pattern.sub('', stadium_dict['capacity']))
+        stadium_attrs['capacity'] = int(num_pattern.sub('', stadium_dict['capacity']))
     else:
-        capacity = -1
+        stadium_attrs['capacity'] = -1
     if 'wikipage' in stadium_dict.keys():
-        return Stadium.objects.create(name=stadium_name, city=city, capacity=capacity,
-                                      wikipage=stadium_dict['wikipage'])
-    else:
-        return Stadium.objects.create(name=stadium_name, city=city, capacity=capacity)
+        stadium_attrs['wikipage'] = stadium_dict['wikipage']
+    return Stadium.objects.create(**stadium_attrs)
 
 
 def create_new_city(city_dict, region, country):
-    city_name = utils.format_text_to_save_db(city_dict['name'])
+    city_attrs = {'name': utils.format_text_to_save_db(city_dict['name'])}
     if 'wikipage' in city_dict.keys():
-        if region:
-            return City.objects.create(name=city_name, country=country, region=region,
-                                       wikipage=city_dict['wikipage'])
-        else:
-            return City.objects.create(name=city_name, country=country, wikipage=city_dict['wikipage'])
-    else:
-        if region:
-            return City.objects.create(name=city_name, country=country, region=region)
-        else:
-            return City.objects.create(name=city_name, country=country)
+        city_attrs['wikipage'] = city_dict['wikipage']
+    if region:
+        city_attrs['region'] = region
+    return City.objects.create(**city_attrs)
 
 
 def create_new_region(region_dict, country):
-    region_name = utils.format_text_to_save_db(region_dict['name'])
+    region_attrs = {'name': utils.format_text_to_save_db(region_dict['name'])}
     if 'wikipage' in region_dict.keys():
-        return Region.objects.create(name=region_name, country=country, wikipage=region_dict['wikipage'])
-    else:
-        return City.objects.create(name=region_name, country=country)
+        region_attrs['wikipage'] = region_dict['wikipage']
+    return Region.objects.create(**region_attrs)
 
 
 class SourceAdmin(admin.ModelAdmin):
@@ -99,19 +144,17 @@ class TournamentAdmin(admin.ModelAdmin):
 
     def __get_or_create_region(self, region_dict):
         region_name = utils.normalize_text(region_dict['name'])
-        region_objs = Region.objects.filter(name__icontains=region_name)
-        if len(region_objs) == 0:
+        ret_objs = search_obj_by_name(Region, region_name)
+        if not ret_objs:
             # the region doesn't exist, the default country for
             # all regions will be paraguay
             country = Country.objects.get(name__iexact=DEF_COUNTRY)
-            region = create_new_region(region_dict, country)
-        elif len(region_objs) == 1:
-            region = region_objs[0]
-        elif len(region_objs) > 1:
-            region = disambiguate_objs_by_name(region_objs, region_name)
+            region_obj = create_new_region(region_dict, country)
+        elif len(ret_objs) > 1:
+            raise Exception('Got more than one region')
         else:
-            raise Exception('Error!, Dont understand the number of cities')
-        return region
+            region_obj = ret_objs[0]
+        return region_obj
 
     def __update_city(self, city_obj, city_dict):
         if 'wikipage' in city_dict.keys():
@@ -123,8 +166,8 @@ class TournamentAdmin(admin.ModelAdmin):
 
     def __get_or_create_city(self, city_dict):
         city_name = utils.normalize_text(city_dict['name'])
-        city_objs = City.objects.filter(name__icontains=city_name)
-        if len(city_objs) == 0:
+        ret_obj = search_obj_by_name(City, city_name)
+        if not ret_obj:
             # the city doesn't exist, the default country for
             # all cities will be paraguay
             country = Country.objects.get(name__iexact=DEF_COUNTRY)
@@ -132,15 +175,13 @@ class TournamentAdmin(admin.ModelAdmin):
                 region = self.__get_or_create_region(city_dict['region'])
             else:
                 region = None
-            city = create_new_city(city_dict, region, country)
-        elif len(city_objs) == 1:
-            city = city_objs[0]
-        elif len(city_objs) > 1:
-            city = disambiguate_objs_by_name(city_objs, city_name)
+            city_obj = create_new_city(city_dict, region, country)
+        elif len(ret_obj) > 1:
+            raise Exception('Got more than one city')
         else:
-            raise Exception('Dont understand the number of cities')
-        self.__update_city(city, city_dict)
-        return city
+            city_obj = ret_obj[0]
+            self.__update_city(city_obj, city_dict)
+        return city_obj
 
     def __update_stadium(self, stadium_obj, stadium_dict):
         if 'capacity' in stadium_dict.keys():
@@ -151,19 +192,29 @@ class TournamentAdmin(admin.ModelAdmin):
 
     def __get_or_create_stadium(self, stadium_dict, city_dict):
         stadium_name = utils.normalize_text(stadium_dict['name'])
-        stadium_objs = Stadium.objects.filter(name__icontains=stadium_name)
-        city = self.__get_or_create_city(city_dict)
-        if len(stadium_objs) == 0:
+        ret_obj = search_obj_by_name(Stadium, stadium_name)
+        if not ret_obj:
             # the stadium doesn't exist yet
-            stadium = create_new_stadium(stadium_dict, city)
-        elif len(stadium_objs) == 1:
-            stadium = stadium_objs[0]
-        elif len(stadium_objs) > 1:
-            stadium = disambiguate_objs_by_name(stadium_objs, stadium_name)
+            city = self.__get_or_create_city(city_dict)
+            stadium_obj = create_new_stadium(stadium_dict, city)
+        elif len(ret_obj) > 0:
+            raise Exception('Got more than one staidum')
         else:
-            raise Exception('Dont understand the number of stadiums')
-        self.__update_stadium(stadium, stadium_dict)
-        return stadium
+            stadium_obj = ret_obj[0]
+            self.__update_stadium(stadium_obj, stadium_dict)
+        return stadium_obj
+
+    def __disambiguate_team(self, team_objs, tournament_obj):
+        teams_str = ''
+        for team_obj in team_objs:
+            teams_str += team_obj.name + ' '
+            try:
+                team_tournament_obj = TournamentTeam.objects.get(tournament=tournament_obj,
+                                                                 team=team_obj)
+                return team_tournament_obj.team
+            except ObjectDoesNotExist:
+                continue
+        raise Exception('Couldnt disambiguate the teams ', teams_str)
 
     def __update_team(self, team_obj, team_dict):
         if 'foundation' in team_dict.keys():
@@ -172,16 +223,12 @@ class TournamentAdmin(admin.ModelAdmin):
             team_obj.wikipage = team_dict['wikipage']
         team_obj.save()
 
-    def __get_or_create_team(self, team, source):
+    def __get_or_create_team(self, tournament_obj, team, source):
         team_name = utils.normalize_text(team['name'])
         team_name = team_name.replace('club', '').strip()  # delete word 'club'
-        team_objs = Team.objects.filter(name__icontains=team_name)
+        ret_obj = search_obj_by_name(Team, team_name)
         stadium = None
-        if len(team_objs) == 1:
-            team_obj = team_objs[0]
-        elif len(team_objs) > 1:
-            team_obj = disambiguate_objs_by_name(team_objs, team_name)
-        elif len(team_objs) == 0:
+        if not ret_obj:
             # the team doesn't exist yet
             if 'stadium' in team.keys() and 'city' in team.keys():
                 stadium = self.__get_or_create_stadium(team['stadium'], team['city'])
@@ -189,14 +236,130 @@ class TournamentAdmin(admin.ModelAdmin):
             else:
                 raise Exception('The team {0} doesnt exist and a new one cannot be created because there are not '
                                 'information about city and stadium'.format(team_name))
+        elif len(ret_obj) > 1:
+            team_obj = self.__disambiguate_team(ret_obj, tournament_obj)
         else:
-            raise Exception('Dont understand the number of teams')
+            team_obj = ret_obj[0]
         # associate the team with its stadium in case the association
         # doesn't exists
         if stadium and not team_obj.stadium.all():
             StadiumTeam.objects.create(stadium=stadium, team=team_obj, source=source)
         self.__update_team(team_obj, team)
         return team_obj
+
+    def __disambiguate_player(self, player_objs, tournament_obj):
+        tournament_teams = tournament_obj.teams.all()
+        players_str = ''
+        for player_obj in player_objs:
+            players_str += player_obj.name + ' '
+            player_teams = player_objs.team_set.all()
+            for team in player_teams:
+                if team in tournament_teams:
+                    return player_obj
+        raise Exception('Couldnt disambiguate the players ', players_str)
+
+    def __get_or_create_player(self, tournament_obj, player_dict):
+        player_name = utils.normalize_text(player_dict['name'])
+        ret_obj = search_obj_by_name(Player, player_name)
+        if not ret_obj:
+            # the player doesn't exist yet
+            player_obj = create_new_person(player_dict)
+        elif len(ret_obj) > 1:
+            player_obj = self.__disambiguate_player(ret_obj, tournament_obj)
+        else:
+            player_obj = ret_obj[0]
+        update_person(player_obj, player_dict)
+        return player_obj
+
+    def __add_team_game(self, tournament_obj, game_obj, source_obj, team_dict,
+                        rival_dict, home=True):
+        team_obj = self.__get_or_create_team(tournament_obj, team_dict, source_obj)
+        game_team_attrs = {
+            'game': game_obj,
+            'team': team_obj,
+            'home': home,
+            'goals': int(team_dict['score'])
+        }
+        game_team_obj = GameTeam.objects.create(**game_team_attrs)
+        # update team info in tournament
+        try:
+            tournament_team_obj = TournamentTeam.objects.get(tournament=tournament_obj,
+                                                             team=team_obj)
+        except ObjectDoesNotExist:
+            tournament_team_obj = TournamentTeam.objects.create(tournament=tournament_obj,
+                                                                team=team_obj,
+                                                                source=source_obj)
+        tournament_team_obj.games += 1
+        if game_team_obj.goals > int(rival_dict['score']):
+            team_result = 'won'
+            tournament_team_obj.wins += 1
+        elif game_team_obj.goals == int(rival_dict['score']):
+            team_result = 'drew'
+            tournament_team_obj.draws +=1
+        else:
+            team_result = 'lost'
+            tournament_team_obj.losses += 1
+        tournament_team_obj.goals += len(team_dict['goals_info'])
+        tournament_team_obj.goals_conceded += len(rival_dict['goals_info'])
+        # create goal models
+        game_players = defaultdict(list)
+        for goal in team_dict['goals_info']:
+            player_obj = self.__get_or_create_player(tournament_obj, {'name': goal['author']})
+            goal_attrs = {
+                'author': player_obj,
+                'minute': int(goal['minute']),
+                'game': game_obj
+            }
+            if goal['type']:
+                if goal['type'] == 'penalty':
+                    goal_attrs['type'] = 'penalty'
+                if goal['type'] == 'own goal':
+                    goal_attrs['own'] = True
+            goal_obj = Goal.objects.create(**goal_attrs)
+            goal_obj.source.add(source_obj)
+            # create/update game player models
+            try:
+                game_player_obj = GamePlayer.objects.get(player=player_obj)
+                game_player_obj.goals += 1
+                game_player_obj.save()
+            except ObjectDoesNotExist:
+                game_player_attrs = {
+                    'game': game_obj,
+                    'player': player_obj,
+                    'goals': 1
+                }
+                game_player_obj = GamePlayer.objects.create(**game_player_attrs)
+                game_player_obj.source.add(source_obj)
+            # create/update team player models
+            try:
+                team_player_obj = PlayerTeam.objects.get(player=player_obj)
+                if player_obj.id not in game_players.keys():
+                    team_player_obj.games += 1
+                    if team_result == 'won':
+                        team_player_obj.wins += 1
+                    elif team_result == 'drew':
+                        team_player_obj.draws += 1
+                    else:
+                        team_player_obj.losses += 1
+                team_player_obj.goals += 1
+                team_player_obj.save()
+            except ObjectDoesNotExist:
+                team_player_attrs = {
+                    'player': player_obj,
+                    'team': team_obj,
+                    'games': 1,
+                    'goals': 1
+                }
+                if team_result == 'won':
+                    team_player_attrs['wins'] = 1
+                elif team_result == 'drew':
+                    team_player_attrs['draws'] = 1
+                else:
+                    team_player_attrs['losses'] = 1
+                player_team_obj = PlayerTeam.objects.create(**team_player_attrs)
+                player_team_obj.source.add(source_obj)
+            game_players[player_obj.id].append(goal)
+        return game_players
 
     def collect_extra_info(self, request, queryset):
         for obj in queryset:
@@ -213,14 +376,14 @@ class TournamentAdmin(admin.ModelAdmin):
             if 'teams info' in information_collected:
                 for team in tournament_info['teams']:
                     # add teams to tournament
-                    team_obj = self.__get_or_create_team(team, source_obj)
+                    team_obj = self.__get_or_create_team(tournament_obj, team, source_obj)
                     TournamentTeam.objects.create(tournament=tournament_obj,
                                                   team=team_obj,
                                                   source=source_obj)
             if 'season statuses' in information_collected:
                 for team in tournament_info['teams']:
                     # create the teams' season final status
-                    team_obj = self.__get_or_create_team(team, source_obj)
+                    team_obj = self.__get_or_create_team(tournament_obj, team, source_obj)
                     ss = SeasonTeamFinalStatus.objects.create(team=team_obj, season=obj.year,
                                                               position=int(team['position']),
                                                               points=int(team['points']),
@@ -238,18 +401,74 @@ class TournamentAdmin(admin.ModelAdmin):
         self.message_user(request, "The action was completed successfully!")
     collect_extra_info.short_description = "Collect Extra Information"
 
+    def __add_players_to_tournament_list(self, tournament_players, players):
+        for player_id, goals in players.items():
+            if player_id in tournament_players.keys():
+                tournament_players[player_id].extend(goals)
+            else:
+                tournament_players[player_id].append(goals)
+        return tournament_players
+
     def collect_results(self, request, queryset):
-        DEF_PREFIX_TOURNAMENT_FILE = 'campeonatos'
+        def_prefix_tournament_file = 'campeonatos'
+        def_city = 'Asuncion'
 
         for obj in queryset:
+            tournament_players = defaultdict(list)
+            tournament_obj = obj
+            source_obj = tournament_obj.source.all()[0]
             tournament_dict = {
                 'name': obj.name,
                 'year': obj.year,
                 'start_string': obj.start_string,
                 'end_string': obj.end_string,
-                'results_local_fname': '{0}{1}.html'.format(DEF_PREFIX_TOURNAMENT_FILE, obj.year)
+                'results_local_file_name': '{0}{1}.html'.format(def_prefix_tournament_file, obj.year),
+                'num_teams': obj.number_of_teams
             }
-            parser_rsssf.read_championship_results(tournament_dict)
+            if int(obj.year) <= 2007:
+                results_tournament = parser_rsssf.get_data(tournament_dict)
+            else:
+                res_scraper = ParaguayanChampionshipResultsScraper(source_obj.url)
+                results_tournament = res_scraper.collect_championship_results(tournament_dict)
+            for result in results_tournament:
+                if isinstance(result, dict):   # tournaments <= 2007
+                    for game in result['games']:
+                        game_attrs = {
+                            'tournament': tournament_obj,
+                            'round': result['round']
+                        }
+                        if game['date']:
+                            game_attrs['datetime'] = datetime.strptime(game['date'], '%Y-%m-%d')
+                        if 'stadium' in game.keys() and game['stadium']:
+                            stadium_dict = {'name': game['stadium']}
+                            city_dict = {'name': def_city}
+                            game_attrs['stadium'] = self.__get_or_create_stadium(stadium_dict, city_dict)
+                        game_obj = Game.objects.create(**game_attrs)
+                        game_obj.source.add(source_obj)
+                        # add home team to game
+                        game_players = self.__add_team_game(tournament_obj, game_obj, source_obj,
+                                                            game['home_team'], game['away_team'],
+                                                            home=True)
+                        tournament_players = self.__add_players_to_tournament_list(tournament_players,
+                                                                                   game_players)
+                        # add away team to game
+                        game_players = self.__add_team_game(tournament_obj, game_obj, source_obj,
+                                                            game['away_team'], game['home_team'],
+                                                            home=False)
+                        tournament_players = self.__add_players_to_tournament_list(tournament_players,
+                                                                                   game_players)
+                else:  # tournaments > 2007
+                    pass
+            # create tournament player models
+            for player_id, goals in tournament_players.items():
+                player_obj = Player.objects.get(id=player_id)
+                tournament_player_attrs = {
+                    'tournament': tournament_obj,
+                    'player': player_obj,
+                    'goals': len(goals),
+                    'source': source_obj
+                }
+                TournamentPlayer.objects.create(**tournament_player_attrs)
         self.message_user(request, "The action was completed successfully!")
     collect_results.short_description = "Collect Tournament Results"
 
@@ -266,16 +485,21 @@ class TeamAdmin(admin.ModelAdmin):
 
 
 class GameAdmin(admin.ModelAdmin):
-    list_display = ('game_date', 'game_time', 'tournament', 'round', 'game_stadium',
-                    'home', 'away', 'score')
-    ordering = ('tournament', 'round')
+    list_display = ('game_date', 'game_time', 'game_stadium', 'tournament',
+                    'home', 'away', 'score', 'round')
+    ordering = ('tournament', )
+    list_filter = ('tournament', )
 
     def game_date(self, obj):
-        return obj.datetime.date()
+        if obj.datetime:
+            return obj.datetime.date()
+        else:
+            return 'Unknown'
 
     def game_time(self, obj):
-        if obj.datetime.hour == 0 and \
-           obj.datetime.minute == 0:
+        if not obj.datetime or \
+           (obj.datetime.hour == 0 and
+            obj.datetime.minute == 0):
             return 'Unknown'
         else:
             return obj.datetime.time()
@@ -287,28 +511,32 @@ class GameAdmin(admin.ModelAdmin):
             return obj.stadium
 
     def home(self, obj):
-        game_teams = obj.gameteam_set.all()
-        if game_teams[0].home:
-            return game_teams[0].team.name
+        game_teams = obj.teams.all()
+        game_team1 = GameTeam.objects.get(game=obj, team=game_teams[0])
+        if game_team1.home:
+            return game_teams[0].name
         else:
-            return game_teams[1].team.name
+            return game_teams[1].name
 
     def away(self, obj):
-        game_teams = obj.gameteam_set.all()
-        if game_teams[0].home:
-            return game_teams[1].team.name
+        game_teams = obj.teams.all()
+        game_team1 = GameTeam.objects.get(game=obj, team=game_teams[0])
+        if game_team1.home:
+            return game_teams[1].name
         else:
-            return game_teams[0].team.name
+            return game_teams[0].name
 
     def score(self, obj):
-        game_teams = obj.gameteam_set.all()
-        if game_teams[0].home:
-            home_idx = 0
-            away_idx = 1
+        game_teams = obj.teams.all()
+        game_team1 = GameTeam.objects.get(game=obj, team=game_teams[0])
+        game_team2 = GameTeam.objects.get(game=obj, team=game_teams[1])
+        if game_team1.home:
+            score_home = game_team1.goals
+            score_away = game_team2.goals
         else:
-            home_idx = 1
-            away_idx = 0
-        ret = '%s - %s' % (game_teams[home_idx].goals, game_teams[away_idx].goals)
+            score_away = game_team1.goals
+            score_home = game_team2.goals
+        ret = '%s - %s' % (score_home, score_away)
         return ret
 
 
@@ -365,7 +593,7 @@ admin.site.register(TournamentPlayer)
 #admin.site.register(TournamentStatus)
 admin.site.register(SeasonTeamFinalStatus, SeasonTeamFinalStatusAdmin)
 admin.site.register(Game, GameAdmin)
-admin.site.register(GameTeam, GameTeamAdmin)
+#admin.site.register(GameTeam, GameTeamAdmin)
 admin.site.register(GamePlayer)
 admin.site.register(GameReferee)
 admin.site.register(Goal)

@@ -1026,9 +1026,16 @@ class ParaguayanTournamentScraper:
             top_scorer = {}
             for j in range(0, num_cols):
                 if 'pais' in header[j]:
-                    top_scorer['country'] = self.__process_country_flag_cell(table_columns[j])
+                    country = self.__process_country_flag_cell(table_columns[j])
+                    if 'scorer' in top_scorer.keys():
+                        top_scorer['scorer']['country'] = country
+                    else:
+                        top_scorer['scorer'] = {'country': country}
                 if 'jugador' in header[j]:
-                    top_scorer['scorer'] = self.__process_player_cell(table_columns[j])
+                    if 'scorer' in top_scorer.keys():
+                        top_scorer['scorer'].update(self.__process_player_cell(table_columns[j]))
+                    else:
+                        top_scorer['scorer'] = self.__process_player_cell(table_columns[j])
                 if 'equipo' in header[j]:
                     top_scorer['team'] = self.__process_team_cell(table_columns[j])
                 if 'goles' in header[j]:
