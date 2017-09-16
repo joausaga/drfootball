@@ -16,7 +16,6 @@ GOAL_TYPES = (
     ('head', 'Head'),
     ('right', 'Right'),
     ('left', 'Left'),
-    ('owngoal', 'Own Goal'),
 )
 
 CARD_TYPES = (
@@ -83,9 +82,8 @@ TACTICS = (
     ('other', 'Other'),
 )
 
-# Create your models here.
 
-
+# used
 class Source(models.Model):
     name = models.CharField(max_length=100)
     url = models.URLField()
@@ -94,14 +92,14 @@ class Source(models.Model):
     def __unicode__(self):
         return "%s: %s" % (self.name, self.url)
 
-
+# used
 class Country(models.Model):
     name = models.CharField(max_length=100)
 
     def __unicode__(self):
         return "%s" % self.name
 
-
+# used
 class Region(models.Model):
     name = models.CharField(max_length=100)
     country = models.ForeignKey(Country)
@@ -109,7 +107,7 @@ class Region(models.Model):
     def __unicode__(self):
         return "%s, %s" % (self.name, self.country.name)
 
-
+# used
 class City(models.Model):
     name = models.CharField(max_length=100)
     region = models.ForeignKey(Region, blank=True, null=True)
@@ -122,7 +120,7 @@ class City(models.Model):
         else:
             return "%s, %s" % (self.name, self.country.name)
 
-
+# used
 class Stadium(models.Model):
     name = models.CharField(max_length=100)
     city = models.ForeignKey(City)
@@ -139,9 +137,8 @@ class Stadium(models.Model):
 
 
 class Player(models.Model):
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    nationality = models.ForeignKey(Country)
+    name = models.CharField(max_length=100)
+    nationality = models.ForeignKey(Country, null=True, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     picture = models.ImageField(null=True, blank=True)
     height = models.FloatField(null=True, blank=True)
@@ -150,22 +147,23 @@ class Player(models.Model):
                                  choices=POSITIONS)
     leg = models.CharField(max_length=50, null=True, blank=True,
                            choices=LEG_TYPES)
+    wikipage = models.URLField(blank=True, null=True)
 
     def __unicode__(self):
-        return "%s %s" % (self.first_name, self.last_name)
+        return "%s" % self.name
 
 
 class Coach(models.Model):
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    nationality = models.ForeignKey(Country)
+    name = models.CharField(max_length=100)
+    nationality = models.ForeignKey(Country, null=True, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     picture = models.ImageField(null=True, blank=True)
     championships = models.IntegerField(default=0)
     runnerups = models.IntegerField(default=0)
+    wikipage = models.URLField(blank=True, null=True)
 
     def __unicode__(self):
-        return "%s %s" % (self.first_name, self.last_name)
+        return "%s" % self.name
 
 
 class Referee(models.Model):
@@ -178,7 +176,7 @@ class Referee(models.Model):
     def __unicode__(self):
         return "%s %s" % (self.first_name, self.last_name)
 
-
+# used
 class Team(models.Model):
     name = models.CharField(max_length=100)
     city = models.ForeignKey(City)
@@ -206,7 +204,7 @@ class Team(models.Model):
 class PlayerTeam(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
-    data_joined = models.DateField()
+    data_joined = models.DateField(null=True, blank=True)
     transfer_us_dollar = models.FloatField(null=True, blank=True)
     championships = models.IntegerField(default=0)
     runnerups = models.IntegerField(default=0)
@@ -234,14 +232,14 @@ class CoachTeam(models.Model):
     losses = models.IntegerField(default=0)
     source = models.ManyToManyField(Source)
 
-
+# used
 class StadiumTeam(models.Model):
     stadium = models.ForeignKey(Stadium, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
     from_date = models.DateField(null=True, blank=True)
     source = models.ForeignKey(Source, default='')
 
-
+# used
 class Tournament(models.Model):
     name = models.CharField(max_length=100)
     country = models.ForeignKey(Country, on_delete=models.CASCADE)
@@ -270,7 +268,7 @@ class Tournament(models.Model):
     def __unicode__(self):
         return "%s, %s" % (self.name, self.country)
 
-
+# used
 class TournamentPlayer(models.Model):
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE)
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
@@ -280,7 +278,7 @@ class TournamentPlayer(models.Model):
     as_starter = models.IntegerField(default=0)
     source = models.ManyToManyField(Source)
 
-
+# used
 class TournamentTeam(models.Model):
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
@@ -294,14 +292,14 @@ class TournamentTeam(models.Model):
     final_position = models.IntegerField(default=0)
     source = models.ForeignKey(Source, default='')
 
-
+# used
 class TournamentStatus(models.Model):
     name = models.CharField(max_length=100)
 
     def __unicode__(self):
         return "%s" % (self.name)
 
-
+# used
 class SeasonTeamFinalStatus(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
     season = models.IntegerField(default=0)
@@ -316,7 +314,7 @@ class SeasonTeamFinalStatus(models.Model):
     goals_conceded = models.IntegerField(default=0)
     goals_difference = models.IntegerField(default=0)
 
-
+# used
 class Game(models.Model):
     datetime = models.DateTimeField(null=True, blank=True)
     round = models.IntegerField()
@@ -331,9 +329,12 @@ class Game(models.Model):
     source = models.ManyToManyField(Source)
 
     def __unicode__(self):
-        return "%s - %s, round: %s" % (self.datetime.date(), self.tournament.name, self.round)
+        if self.datetime:
+            return "%s - %s, round: %s" % (self.datetime.date(), self.tournament.name, self.round)
+        else:
+            return "%s, round: %s" % (self.tournament.name, self.round)
 
-
+# used
 class GameTeam(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
@@ -341,7 +342,7 @@ class GameTeam(models.Model):
     goals = models.IntegerField(default=0)
     tactic = models.CharField(max_length=50, choices=TACTICS, null=True, blank=True)
 
-
+# used
 class GamePlayer(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE)
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
