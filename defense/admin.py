@@ -41,6 +41,7 @@ def disambiguate_objs_by_name(objs, ref_name):
 
 
 def search_most_similar_strings(model, name):
+    threshold = 0.50
     objs_to_return = []
     model_objs = model.objects.all()
     similar_ratios = []
@@ -48,10 +49,11 @@ def search_most_similar_strings(model, name):
         similar_ratios.append(SequenceMatcher(None, name, obj.name).ratio())
     if similar_ratios:
         max_ratios = max(similar_ratios)
-        size_vec_sim = len(similar_ratios)
-        for i in range(0, size_vec_sim):
-            if similar_ratios[i] == max_ratios:
-                objs_to_return.append(model_objs[i])
+        if max_ratios > threshold:
+            size_vec_sim = len(similar_ratios)
+            for i in range(0, size_vec_sim):
+                if similar_ratios[i] == max_ratios:
+                    objs_to_return.append(model_objs[i])
     return objs_to_return
 
 def search_obj_by_name(model, name):
@@ -158,6 +160,9 @@ class TournamentAdmin(admin.ModelAdmin):
         return region_obj
 
     def __update_city(self, city_obj, city_dict):
+        if len(city_dict['name']) > len(city_obj.name):
+            city_obj.name = city_dict['name']
+        city_obj.name = city_dict['name']
         if 'wikipage' in city_dict.keys():
             city_obj.wikipage = city_dict['wikipage']
         if 'region' in city_dict.keys():
@@ -185,6 +190,9 @@ class TournamentAdmin(admin.ModelAdmin):
         return city_obj
 
     def __update_stadium(self, stadium_obj, stadium_dict):
+        if len(stadium_dict['name']) > len(stadium_dict.name):
+            stadium_dict.name = stadium_dict['name']
+        stadium_obj.name = stadium_dict['name']
         if 'capacity' in stadium_dict.keys():
             stadium_obj.capacity = stadium_dict['capacity']
         if 'wikipage' in stadium_dict.keys():
@@ -193,6 +201,7 @@ class TournamentAdmin(admin.ModelAdmin):
 
     def __get_or_create_stadium(self, stadium_dict, city_dict):
         stadium_name = utils.normalize_text(stadium_dict['name'])
+        stadium_name = stadium_name.replace('estadio', '').strip()  # delete word 'estadio'
         ret_obj = search_obj_by_name(Stadium, stadium_name)
         if not ret_obj:
             # the stadium doesn't exist yet
@@ -218,6 +227,8 @@ class TournamentAdmin(admin.ModelAdmin):
         raise Exception('Couldnt disambiguate the teams ', teams_str)
 
     def __update_team(self, team_obj, team_dict):
+        if len(team_dict['name']) > len(team_obj.name):
+            team_obj.name = team_dict['name']
         if 'foundation' in team_dict.keys():
             team_obj.foundation = team_dict['foundation']
         if 'wikipage' in team_dict.keys():
@@ -272,17 +283,8 @@ class TournamentAdmin(admin.ModelAdmin):
         update_person(player_obj, player_dict)
         return player_obj
 
-    def __add_team_game(self, tournament_obj, game_obj, source_obj, team_dict,
-                        rival_dict, home=True):
-        team_obj = self.__get_or_create_team(tournament_obj, team_dict, source_obj)
-        game_team_attrs = {
-            'game': game_obj,
-            'team': team_obj,
-            'home': home,
-            'goals': int(team_dict['score'])
-        }
-        game_team_obj = GameTeam.objects.create(**game_team_attrs)
-        # update team info in tournament
+    def __update_team_info_in_tournament(self, tournament_obj, team_obj, source_obj,
+                                         game_team_obj, team_dict, rival_dict):
         try:
             tournament_team_obj = TournamentTeam.objects.get(tournament=tournament_obj,
                                                              team=team_obj)
@@ -302,6 +304,23 @@ class TournamentAdmin(admin.ModelAdmin):
             tournament_team_obj.losses += 1
         tournament_team_obj.goals += len(team_dict['goals_info'])
         tournament_team_obj.goals_conceded += len(rival_dict['goals_info'])
+        tournament_team_obj.points = (3 * tournament_team_obj.wins) + tournament_team_obj.draws
+        tournament_team_obj.save()
+        return team_result
+
+    def __add_team_game(self, tournament_obj, game_obj, source_obj, team_dict,
+                        rival_dict, home=True):
+        team_obj = self.__get_or_create_team(tournament_obj, team_dict, source_obj)
+        game_team_attrs = {
+            'game': game_obj,
+            'team': team_obj,
+            'home': home,
+            'goals': int(team_dict['score'])
+        }
+        game_team_obj = GameTeam.objects.create(**game_team_attrs)
+        # update team info in tournament
+        team_result = self.__update_team_info_in_tournament(tournament_obj, team_obj, source_obj,
+                                                            game_team_obj, team_dict, rival_dict)
         # create goal models
         game_players = defaultdict(list)
         for goal in team_dict['goals_info']:
@@ -320,7 +339,7 @@ class TournamentAdmin(admin.ModelAdmin):
             goal_obj.source.add(source_obj)
             # create/update game player models
             try:
-                game_player_obj = GamePlayer.objects.get(player=player_obj)
+                game_player_obj = GamePlayer.objects.get(game=game_obj, player=player_obj)
                 game_player_obj.goals += 1
                 game_player_obj.save()
             except ObjectDoesNotExist:
@@ -470,14 +489,22 @@ class TournamentAdmin(admin.ModelAdmin):
                 }
                 tp = TournamentPlayer.objects.create(**tournament_player_attrs)
                 tp.source.add(source_obj)
+            # update the final position of teams in tournament
+            t_teams = TournamentTeam.objects.filter(tournament=tournament_obj).order_by('-points')
+            pos = 1
+            for team in t_teams:
+                team.final_position = pos
+                team.save()
+                pos += 1
         self.message_user(request, "The action was completed successfully!")
     collect_results.short_description = "Collect Tournament Results"
 
 
 class TournamentTeamAdmin(admin.ModelAdmin):
-    list_display = ('tournament', 'team', 'final_position')
+    list_display = ('tournament', 'team', 'points', 'games', 'wins', 'draws', 'losses',
+                    'goals', 'goals_conceded', 'cards', 'final_position')
     list_filter = ('tournament', )
-
+    ordering = ('-points', )
 
 class TeamAdmin(admin.ModelAdmin):
     list_display = ('name', 'city', 'foundation', 'local_championships',
@@ -576,6 +603,44 @@ class SeasonTeamFinalStatusAdmin(admin.ModelAdmin):
         return str_final_status
     final_status.short_description = 'International Status'
 
+
+class GoalAdmin(admin.ModelAdmin):
+    list_display = ('author', 'nationality', 'minute_display', 'type_display', 'game')
+    list_filter = ('author', )
+
+    def minute_display(self, obj):
+        if obj.minute < 0:
+            return 'Unknown'
+        else:
+            return obj.minute
+    minute_display.short_description = 'Minute'
+
+    def type_display(self, obj):
+        if not obj.type:
+            return 'Unknown'
+        else:
+            return obj.type
+    type_display.short_description = 'Type'
+
+    def nationality(self, obj):
+        if not obj.author.nationality:
+            return 'Unknown'
+        else:
+            return obj.author.nationality
+
+
+class GamePlayerAdmin(admin.ModelAdmin):
+    list_display = ('player', 'game', 'goals', 'cards')
+
+
+class TournamentPlayerAdmin(admin.ModelAdmin):
+    list_display = ('player', 'tournament', 'goals', 'cards')
+
+
+class PlayerTeamAdmin(admin.ModelAdmin):
+    list_display = ('player', 'team', 'games', 'wins', 'draws', 'losses', 'goals', 'cards')
+
+
 admin.site.register(Source, SourceAdmin)
 admin.site.register(Country)
 admin.site.register(Region)
@@ -585,17 +650,17 @@ admin.site.register(Player)
 admin.site.register(Coach)
 admin.site.register(Referee)
 admin.site.register(Team, TeamAdmin)
-admin.site.register(PlayerTeam)
+admin.site.register(PlayerTeam, PlayerTeamAdmin)
 admin.site.register(CoachTeam)
 #admin.site.register(StadiumTeam)
 admin.site.register(Tournament, TournamentAdmin)
 admin.site.register(TournamentTeam, TournamentTeamAdmin)
-admin.site.register(TournamentPlayer)
+admin.site.register(TournamentPlayer, TournamentPlayerAdmin)
 #admin.site.register(TournamentStatus)
 admin.site.register(SeasonTeamFinalStatus, SeasonTeamFinalStatusAdmin)
 admin.site.register(Game, GameAdmin)
 #admin.site.register(GameTeam, GameTeamAdmin)
-admin.site.register(GamePlayer)
+admin.site.register(GamePlayer, GamePlayerAdmin)
 admin.site.register(GameReferee)
-admin.site.register(Goal)
+admin.site.register(Goal, GoalAdmin)
 admin.site.register(Card)
