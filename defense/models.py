@@ -282,6 +282,7 @@ class TournamentPlayer(models.Model):
 class TournamentTeam(models.Model):
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
+    points = models.IntegerField(default=0)
     games = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
     draws = models.IntegerField(default=0)
