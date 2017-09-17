@@ -60,6 +60,8 @@ def get_game_info(line, date_round, year, stadium=''):
                 if not found_result:
                     home_team.append(element.strip())
                 else:
+                    if 'player' in element:
+                        break
                     away_team.append(element.strip())
             else:
                 break
@@ -349,7 +351,7 @@ def get_data(championship):
 if __name__ == '__main__':
     dict_championships = []
     meta_championships = utils.csv_to_dict('data/campeonatos.csv')
-    print(read_championship_results(meta_championships[7]))
+    print(read_championship_results(meta_championships[4]))
     # for meta_championship in meta_championships:
     #     if int(meta_championship['year']) <= 2007:
     #         print('Championship %s', meta_championship['name'])
