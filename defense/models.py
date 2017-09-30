@@ -137,7 +137,8 @@ class Stadium(models.Model):
 
 
 class Player(models.Model):
-    name = models.CharField(max_length=100)
+    first_name = models.CharField(max_length=100, default='')
+    last_name = models.CharField(max_length=100, default='')
     nationality = models.ForeignKey(Country, null=True, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     picture = models.ImageField(null=True, blank=True)
@@ -150,7 +151,7 @@ class Player(models.Model):
     wikipage = models.URLField(blank=True, null=True)
 
     def __unicode__(self):
-        return "%s" % self.name
+        return "{0} {1}".format(self.first_name, self.last_name)
 
 
 class Coach(models.Model):
@@ -319,6 +320,7 @@ class SeasonTeamFinalStatus(models.Model):
 class Game(models.Model):
     datetime = models.DateTimeField(null=True, blank=True)
     round = models.IntegerField()
+    stage = models.CharField(max_length=50, null=True, blank=True)
     stadium = models.ForeignKey(Stadium, on_delete=models.CASCADE, null=True, blank=True)
     picture = models.ImageField(null=True, blank=True)
     teams = models.ManyToManyField(Team, through='GameTeam')

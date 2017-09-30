@@ -69,7 +69,14 @@ def search_obj_by_name(model, name):
     return objs_to_return
 
 
+def search_person_by_name(name):
+    vec_name = name.split(' ')
+    last_name = vec_name[-1].strip().lower()  # assume that the last part of the name contains the lastname
+    return Player.objects.filter(last_name__iexact=last_name)
+
+
 def create_new_person(person_dict):
+
     person_attrs = {'name': utils.format_text_to_save_db(person_dict['name'])}
     if 'wikipage' in person_dict.keys() and person_dict['wikipage']:
         person_attrs['wikipage'] = person_dict['wikipage']
@@ -272,7 +279,7 @@ class TournamentAdmin(admin.ModelAdmin):
 
     def __get_or_create_player(self, tournament_obj, player_dict):
         player_name = utils.normalize_text(player_dict['name'])
-        ret_obj = search_obj_by_name(Player, player_name)
+        ret_obj = search_person_by_name(player_name)
         if not ret_obj:
             # the player doesn't exist yet
             player_obj = create_new_person(player_dict)
@@ -463,6 +470,8 @@ class TournamentAdmin(admin.ModelAdmin):
                             stadium_dict = {'name': game['stadium']}
                             city_dict = {'name': def_city}
                             game_attrs['stadium'] = self.__get_or_create_stadium(stadium_dict, city_dict)
+                        if 'stage' in game.keys():
+                            game_attrs['stage'] = game['stage']
                         game_obj = Game.objects.create(**game_attrs)
                         game_obj.source.add(source_obj)
                         # add home team to game
@@ -577,8 +586,11 @@ class StadiumAdmin(admin.ModelAdmin):
     ordering = ('name',)
 
     def team_owner(self, obj):
-        team_owner = obj.team_set.all()[0]
-        return team_owner.name
+        team_owner = obj.team_set.all()
+        if len(team_owner) > 0:
+            return team_owner[0].name
+        else:
+            return 'Unknown'
     team_owner.short_description = 'Team Owner'
 
     def display_capacity(self, obj):
@@ -592,7 +604,7 @@ class StadiumAdmin(admin.ModelAdmin):
 class SeasonTeamFinalStatusAdmin(admin.ModelAdmin):
     list_display = ('position', 'team', 'season', 'final_status', 'points', 'games', 'wins', 'draws',
                     'losses', 'goals', 'goals_conceded', 'goals_difference')
-    ordering = ('position', 'season')
+    ordering = ('position', )
     list_filter = ('season', )
 
     def final_status(self, obj):
@@ -601,7 +613,7 @@ class SeasonTeamFinalStatusAdmin(admin.ModelAdmin):
         for status in statuses:
             str_final_status = status.name.title() + ' '
         return str_final_status
-    final_status.short_description = 'International Status'
+    final_status.short_description = 'Final Status'
 
 
 class GoalAdmin(admin.ModelAdmin):
@@ -635,6 +647,8 @@ class GamePlayerAdmin(admin.ModelAdmin):
 
 class TournamentPlayerAdmin(admin.ModelAdmin):
     list_display = ('player', 'tournament', 'goals', 'cards')
+    list_filter = ('tournament', )
+    ordering = ('-goals', 'player', )
 
 
 class PlayerTeamAdmin(admin.ModelAdmin):
