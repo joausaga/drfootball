@@ -535,62 +535,68 @@ class ParaguayanTournamentScraper:
 
     def __get_info_to_collect(self, championship):
         additional_info = championship['additional_info']
-        return [option.strip() for option in additional_info.split(';')]
+        if additional_info:
+            return [option.strip() for option in additional_info.split(';')]
+        else:
+            return None
 
     def collect_tournament_info(self, championship):
         ret = requests.get(self.url)
         if ret.status_code == 200:
             self.dom = BeautifulSoup(ret.text, 'html.parser')
             information_to_collect = self.__get_info_to_collect(championship)
-            championship_year = str(championship['year'])
-            championship_name = championship['name']
-            teams = {}
-            champ = {}
-            if 'teams info' in information_to_collect:
-                teams = self.__process_table_teams(
-                    self.__get_table_teams(championship_year)
-                )
-            if 'season statuses' in information_to_collect:
-                season_statuses = self.__process_table_season_statuses(
-                    self.__get_table_season_statuses(championship_year), championship_year
-                )
-                teams = self.__update_teams_info(teams, season_statuses, False, 'season')
-            if 'top scorers' in information_to_collect:
-                champ['top_scorers'] = self.__process_table_top_scorers(
-                    self.__get_championship_top_scorers()
-                )
-            if 'coach substitutions' in information_to_collect:
-                champ['coach_substitutions'] = self.__process_table_coach_substitutions(
-                    self.__get_coach_substitutions_info(championship_name, championship_year),
-                    championship_year
-                )
-            if 'team buyers' in information_to_collect:
-                team_buyers = self.__process_table_team_buyers(
-                    self.__get_table_team_buyers()
-                )
-                teams = self.__update_teams_info(teams, team_buyers)
-            if 'game top audiences' in information_to_collect:
-                champ['top_audiences'] = self.__process_table_top_audience_games(
-                    self.__get_info_games_large_audience()
-                )
-            if 'team cards' in information_to_collect:
-                team_cards = self.__process_table_team_cards(
-                    self.__get_table_team_cards()
-                )
-                teams = self.__update_teams_info(teams, team_cards)
-            if 'referees' in information_to_collect:
-                champ['referees'] = self.__process_table_referees(
-                    self.__get_referees_info()
-                )
-            if 'team audiences' in information_to_collect:
-                team_audiences = self.__process_table_team_audience(
-                    self.__get_table_audience()
-                )
-                teams = self.__update_teams_info(teams, team_audiences)
-            return {
-                'championship': champ,
-                'teams': teams
-            }
+            if information_to_collect:
+                championship_year = str(championship['year'])
+                championship_name = championship['name']
+                teams = {}
+                champ = {}
+                if 'teams info' in information_to_collect:
+                    teams = self.__process_table_teams(
+                        self.__get_table_teams(championship_year)
+                    )
+                if 'season statuses' in information_to_collect:
+                    season_statuses = self.__process_table_season_statuses(
+                        self.__get_table_season_statuses(championship_year), championship_year
+                    )
+                    teams = self.__update_teams_info(teams, season_statuses, False, 'season')
+                if 'top scorers' in information_to_collect:
+                    champ['top_scorers'] = self.__process_table_top_scorers(
+                        self.__get_championship_top_scorers()
+                    )
+                if 'coach substitutions' in information_to_collect:
+                    champ['coach_substitutions'] = self.__process_table_coach_substitutions(
+                        self.__get_coach_substitutions_info(championship_name, championship_year),
+                        championship_year
+                    )
+                if 'team buyers' in information_to_collect:
+                    team_buyers = self.__process_table_team_buyers(
+                        self.__get_table_team_buyers()
+                    )
+                    teams = self.__update_teams_info(teams, team_buyers)
+                if 'game top audiences' in information_to_collect:
+                    champ['top_audiences'] = self.__process_table_top_audience_games(
+                        self.__get_info_games_large_audience()
+                    )
+                if 'team cards' in information_to_collect:
+                    team_cards = self.__process_table_team_cards(
+                        self.__get_table_team_cards()
+                    )
+                    teams = self.__update_teams_info(teams, team_cards)
+                if 'referees' in information_to_collect:
+                    champ['referees'] = self.__process_table_referees(
+                        self.__get_referees_info()
+                    )
+                if 'team audiences' in information_to_collect:
+                    team_audiences = self.__process_table_team_audience(
+                        self.__get_table_audience()
+                    )
+                    teams = self.__update_teams_info(teams, team_audiences)
+                return {
+                    'championship': champ,
+                    'teams': teams
+                }
+            else:
+                return {}
         else:
             raise Exception('Request get the code ' + ret.status_code)
 
