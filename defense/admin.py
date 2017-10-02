@@ -7,7 +7,7 @@ from datetime import datetime
 import utils
 
 # django modules
-from django.contrib import admin
+from django.contrib import admin, messages
 
 # project imports
 from models import Source, Country, Region, City, Stadium, Player, Coach, \
@@ -30,6 +30,7 @@ class SourceAdmin(admin.ModelAdmin):
 class TournamentAdmin(admin.ModelAdmin):
     list_display = ('name', 'country', 'start_date', 'end_date', 'champion', 'runnerup', 'season_champion')
     actions = ['collect_extra_info', 'collect_results']
+    objs_created = defaultdict(list)
 
     def champion(self, obj):
         tournament_teams = obj.tournamentteam_set.all()
@@ -46,6 +47,17 @@ class TournamentAdmin(admin.ModelAdmin):
                 return tournament_team.team.name
         return ''
 
+    def __display_feedback_msg(self, request):
+        if self.objs_created:
+            msg = 'The action was completed successfully!\n'
+            for model, objs in self.objs_created.items():
+                '- It was created {0} objects of the type {1}\n'.format(model, len(objs))
+            self.message_user(request, msg, level=messages.SUCCESS)
+        else:
+            msg = 'No objects were created'
+            self.message_user(request, msg, level=messages.INFO)
+        return msg
+
     def collect_extra_info(self, request, queryset):
         for obj in queryset:
             tournament_obj = obj
@@ -58,14 +70,16 @@ class TournamentAdmin(admin.ModelAdmin):
             }
             tournament_info = py_ch_scrapper.collect_tournament_info(tournament_dict)
             if tournament_info:
+                self.objs_created = {}
                 information_collected = [option.strip() for option in obj.additional_info.split(';')]
                 if 'teams info' in information_collected:
                     for team in tournament_info['teams']:
                         # add teams to tournament
                         team_obj = get_or_create_team(tournament_obj, team, source_obj)
-                        TournamentTeam.objects.create(tournament=tournament_obj,
-                                                      team=team_obj,
-                                                      source=source_obj)
+                        tt_obj = TournamentTeam.objects.create(tournament=tournament_obj,
+                                                               team=team_obj,
+                                                               source=source_obj)
+                        self.objs_created['TournamentTeam'].append(tt_obj)
                 if 'season statuses' in information_collected:
                     for team in tournament_info['teams']:
                         # create the teams' season final status
@@ -80,12 +94,15 @@ class TournamentAdmin(admin.ModelAdmin):
                                                                   goals=int(team['gf']),
                                                                   goals_conceded=int(team['gc']),
                                                                   goals_difference=int(team['goals_difference']))
+                        self.objs_created['SeasonTeamFinalStatus'].append(ss)
                         if team['international_status']:
                             for status in team['international_status']:
                                 status_obj, created = TournamentStatus.objects.get_or_create(name=status)
                                 ss.status.add(status_obj)
-        self.message_user(request, "The action was completed successfully!")
-    collect_extra_info.short_description = "Collect Extra Information"
+                                if created:
+                                    self.objs_created['TournamentStatus'].append(status_obj)
+        self.__display_feedback_msg(request)
+    collect_extra_info.short_description = 'Collect Extra Information'
 
     def collect_results(self, request, queryset):
         def_prefix_tournament_file = 'campeonatos'
@@ -109,6 +126,7 @@ class TournamentAdmin(admin.ModelAdmin):
                 res_scraper = ParaguayanChampionshipResultsScraper(source_obj.url)
                 results_tournament = res_scraper.collect_championship_results(tournament_dict)
             for result in results_tournament:
+                self.objs_created = {}
                 if isinstance(result, dict):   # tournaments <= 2007
                     for game in result['games']:
                         game_attrs = {
@@ -125,6 +143,7 @@ class TournamentAdmin(admin.ModelAdmin):
                             game_attrs['stage'] = game['stage']
                         game_obj = Game.objects.create(**game_attrs)
                         game_obj.source.add(source_obj)
+                        self.objs_created['Game'].append(game_obj)
                         # add home team to game
                         game_players = add_team_game(tournament_obj, game_obj, source_obj,
                                                      game['home_team'], game['away_team'],
