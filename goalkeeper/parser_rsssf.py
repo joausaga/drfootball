@@ -149,6 +149,7 @@ def get_round_date(line, year):
 
 
 def is_a_round_line(line, next_line, year):
+    year = str(year)
     if 'round' in line.lower() or \
        'first leg' in line.lower() or \
        'second leg' in line.lower():
@@ -351,7 +352,8 @@ def get_data(championship):
 if __name__ == '__main__':
     dict_championships = []
     meta_championships = utils.csv_to_dict('data/campeonatos.csv')
-    print(read_championship_results(meta_championships[4]))
+    print(meta_championships[6])
+    print(read_championship_results(meta_championships[6]))
     # for meta_championship in meta_championships:
     #     if int(meta_championship['year']) <= 2007:
     #         print('Championship %s', meta_championship['name'])
