@@ -203,8 +203,9 @@ def get_or_create_team(tournament_obj, team, source):
 ###
 
 
-def create_new_stadium(stadium_dict):
-    stadium_attrs = {'name': utils.format_text_to_save_db(stadium_dict['name'])}
+def create_new_stadium(stadium_dict, city):
+    stadium_attrs = {'name': utils.format_text_to_save_db(stadium_dict['name']),
+                     'city': city}
     if 'capacity' in stadium_dict.keys():
         stadium_attrs['capacity'] = int(num_pattern.sub('', stadium_dict['capacity']))
     else:
@@ -227,7 +228,8 @@ def update_stadium(stadium_obj, stadium_dict):
 
 def get_or_create_stadium(stadium_dict, city_dict):
     stadium_name = utils.normalize_text(stadium_dict['name'])
-    stadium_name = stadium_name.replace('estadio', '').strip()  # delete word 'estadio'
+    # delete word 'estadio'
+    stadium_name = stadium_name.replace('estadio', '').strip()
     ret_obj = search_obj_by_name(Stadium, stadium_name)
     if not ret_obj:
         # the stadium doesn't exist yet
@@ -278,7 +280,7 @@ def get_or_create_city(city_dict):
             region = get_or_create_region(city_dict['region'])
         else:
             region = None
-        city_obj = create_new_city(city_dict, region, country)
+        city_obj = create_new_city(city_dict, region)
     elif len(ret_obj) > 1:
         raise Exception('Got more than one city')
     else:
@@ -305,7 +307,7 @@ def get_or_create_region(region_dict):
         # the region doesn't exist, the default country for
         # all regions will be paraguay
         country = Country.objects.get(name__iexact=DEF_COUNTRY)
-        region_obj = create_new_region(region_dict, country)
+        region_obj = create_new_region(region_dict)
     elif len(ret_objs) > 1:
         raise Exception('Got more than one region')
     else:
